@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogScope</title>
+<style>
+:root{color-scheme:dark;--bg:#101318;--panel:#191e26;--panel2:#202733;--text:#e7ebf0;--muted:#9ca8b8;--border:#303a48;--accent:#5eead4;--danger:#fb7185;--warn:#fbbf24}
+:root[data-theme="light"]{color-scheme:light;--bg:#f4f6f9;--panel:#fff;--panel2:#edf1f5;--text:#17202b;--muted:#5c6877;--border:#d5dde6;--accent:#0f766e;--danger:#be123c;--warn:#a16207}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;z-index:2}
+.brand{font-size:20px;font-weight:750;letter-spacing:-.5px}.brand span{color:var(--accent)}.grow{flex:1}
+button,input,select{font:inherit;border:1px solid var(--border);border-radius:8px;padding:9px 11px;background:var(--panel);color:var(--text)}
+button{cursor:pointer}button.primary{background:var(--accent);color:#062d29;border-color:transparent;font-weight:700}
+main{max-width:1500px;margin:auto;padding:18px;display:grid;gap:14px}
+.panel{border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:14px;min-width:0}
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted)}.small{font-size:12px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:var(--panel2);padding:12px;border-radius:9px}.stat b{font-size:19px;display:block}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px}.sources{display:grid;gap:7px;margin-top:12px}.source{padding:10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;overflow-wrap:anywhere}.source.active{border-color:var(--accent);background:var(--panel2)}
+.event-list{display:grid;gap:7px;margin-top:12px}.event{border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;min-width:0}.event:hover{border-color:var(--accent)}.event-head{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.time{font-variant-numeric:tabular-nums;color:var(--accent);white-space:nowrap}.level{font-weight:800}.ERROR,.FATAL,.CRITICAL{color:var(--danger)}.WARN{color:var(--warn)}.message{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:5px}.empty{padding:28px;text-align:center;color:var(--muted)}
+input[type="datetime-local"]{min-width:220px}#status{white-space:pre-wrap}.theme{min-width:100px}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding:12px}main{padding:10px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Log<span>Scope</span></div><div class="muted small">Локальный исследователь логов</div><div class="grow"></div>
+  <button id="themeBtn" class="theme">☀ Светлая</button>
+</header>
+<main>
+  <section class="panel">
+    <div class="row">
+      <div style="flex:1;min-width:240px"><b>Импорт набора</b><div class="muted small">Положите файлы в data/inbox и укажите путь к папке внутри неё.</div></div>
+      <input id="folder" style="flex:1;min-width:250px" value="./data/inbox" aria-label="Путь к папке">
+      <button class="primary" id="importBtn">Импортировать</button>
+    </div>
+    <div id="status" class="muted small" style="margin-top:10px">Ожидание подключения к API…</div>
+  </section>
+  <section class="stats">
+    <div class="stat"><span class="muted small">Источники</span><b id="sourceCount">0</b></div>
+    <div class="stat"><span class="muted small">События в индексе</span><b id="eventCount">0</b></div>
+    <div class="stat"><span class="muted small">С временной меткой</span><b id="timedCount">—</b></div>
+    <div class="stat"><span class="muted small">Текущая выборка</span><b id="resultCount">0</b></div>
+  </section>
+  <section class="panel">
+    <div class="row">
+      <b>Временной диапазон</b>
+      <label class="small muted">От <input id="start" type="datetime-local" step="0.001"></label>
+      <label class="small muted">До <input id="end" type="datetime-local" step="0.001"></label>
+      <button id="applyTime">Применить</button><button id="clearTime">Сбросить</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input id="query" placeholder="Поиск по тексту…" style="flex:1;min-width:200px">
+      <select id="level"><option value="">Все уровни</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select>
+      <input id="requestId" placeholder="Request ID">
+      <button id="searchBtn" class="primary">Найти</button>
+    </div>
+  </section>
+  <section class="layout">
+    <aside class="panel">
+      <b>Источники</b><div class="muted small">Выберите источник или «Все».</div>
+      <div class="sources" id="sources"><div class="empty">Нет источников</div></div>
+    </aside>
+    <section class="panel">
+      <div class="row"><b>Хронология событий</b><div class="grow"></div><span id="pageInfo" class="muted small"></span></div>
+      <div id="events" class="event-list"><div class="empty">Импортируйте папку с логами, чтобы начать.</div></div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button id="prevBtn">← Назад</button><button id="nextBtn">Далее →</button></div>
+    </section>
+  </section>
+  <section class="panel" id="detailPanel" hidden>
+    <div class="row"><b>Детали события</b><div class="grow"></div><button id="closeDetail">Закрыть</button></div>
+    <pre id="detail" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let activeSource = null, offset = 0, pageSize = 200, total = 0, sources = [];
+function theme(t){document.documentElement.dataset.theme=t;localStorage.setItem('logscope-theme',t);$('themeBtn').textContent=t==='dark'?'☀ Светлая':'☾ Тёмная'}
+theme(localStorage.getItem('logscope-theme')||'dark');
+$('themeBtn').onclick=()=>theme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+function fmt(ms){if(ms==null)return 'время не определено';return new Date(ms).toLocaleString('ru-RU',{hour12:false})}
+function isoInputToMs(value){if(!value)return null;const d=new Date(value);return Number.isNaN(d.getTime())?null:d.getTime()}
+function msToInput(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`}
+async function api(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
+async function loadSources(){
+  sources=await api('/api/sources');
+  $('sources').innerHTML='';
+  const all=document.createElement('div');all.className='source'+(activeSource===null?' active':'');all.textContent='◉ Все источники';all.onclick=()=>{activeSource=null;offset=0;renderSources();loadEvents()};$('sources').append(all);
+  for(const s of sources){const el=document.createElement('div');el.className='source'+(activeSource===s.id?' active':'');el.innerHTML=`<b></b><div class="muted small"></div><div class="muted small"></div>`;el.children[0].textContent=s.name;el.children[1].textContent=`${s.event_count} событий · ${s.size_bytes.toLocaleString()} байт`;el.children[2].textContent=s.min_time_ms==null?'Время не определено':`${fmt(s.min_time_ms)} — ${fmt(s.max_time_ms)}`;el.onclick=()=>{activeSource=s.id;offset=0;renderSources();loadEvents()};$('sources').append(el)}
+  $('sourceCount').textContent=sources.length;$('eventCount').textContent=sources.reduce((a,s)=>a+s.event_count,0).toLocaleString();
+  $('timedCount').textContent=sources.reduce((a,s)=>a+(s.min_time_ms==null?0:s.event_count),0).toLocaleString();
+}
+function renderSources(){const children=[...$('sources').children];children.forEach((el,i)=>el.classList.toggle('active',i===0?activeSource===null:sources[i-1]?.id===activeSource))}
+async function loadEvents(){
+  const p=new URLSearchParams({limit:pageSize,offset});
+  if(activeSource!==null)p.set('source_id',activeSource);
+  const start=isoInputToMs($('start').value),end=isoInputToMs($('end').value);
+  if(start!==null)p.set('start_ms',start);if(end!==null)p.set('end_ms',end);
+  if($('query').value.trim())p.set('q',$('query').value.trim());
+  if($('level').value)p.set('level',$('level').value);
+  if($('requestId').value.trim())p.set('request_id',$('requestId').value.trim());
+  try{
+    const data=await api('/api/events?'+p.toString());total=data.total;$('resultCount').textContent=total.toLocaleString();$('pageInfo').textContent=`${total.toLocaleString()} найдено · ${offset+1}–${Math.min(offset+pageSize,total)}`;
+    const list=$('events');list.innerHTML='';
+    if(!data.items.length){list.innerHTML='<div class="empty">Событий по заданным условиям не найдено.</div>';return}
+    for(const e of data.items){const el=document.createElement('div');el.className='event';const head=document.createElement('div');head.className='event-head';
+      const t=document.createElement('span');t.className='time';t.textContent=fmt(e.timestamp_ms);
+      const src=document.createElement('span');src.className='muted small';src.textContent=e.source_name;
+      const lev=document.createElement('span');lev.className='level '+(e.level||'');lev.textContent=e.level||'EVENT';
+      const line=document.createElement('span');line.className='muted small';line.textContent=`строка ${e.line_start}`;
+      head.append(t,lev,src,line);const msg=document.createElement('div');msg.className='message';msg.textContent=e.message;
+      el.append(head,msg);el.onclick=()=>showDetail(e.id);list.append(el)
+    }
+  }catch(err){$('status').textContent='Ошибка API: '+err.message}
+}
+async function showDetail(id){const d=await api('/api/events/'+id);$('detailPanel').hidden=false;$('detail').textContent=JSON.stringify(d,null,2);$('detailPanel').scrollIntoView({behavior:'smooth',block:'nearest'})}
+$('importBtn').onclick=async()=>{try{$('status').textContent='Импорт выполняется…';const r=await api('/api/import/path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('folder').value})});const counts=r.files.reduce((a,f)=>{a[f.status]=(a[f.status]||0)+1;return a},{});$('status').textContent=`Импорт завершён: ${JSON.stringify(counts)}\n`+r.files.filter(f=>f.status==='error'||f.status==='skipped').map(f=>`${f.path}: ${f.reason}`).join('\n');offset=0;await loadSources();await loadEvents()}catch(err){$('status').textContent='Ошибка импорта: '+err.message}};
+$('searchBtn').onclick=()=>{offset=0;loadEvents()};$('applyTime').onclick=()=>{offset=0;loadEvents()};$('clearTime').onclick=()=>{$('start').value='';$('end').value='';offset=0;loadEvents()};
+$('prevBtn').onclick=()=>{offset=Math.max(0,offset-pageSize);loadEvents()};$('nextBtn').onclick=()=>{if(offset+pageSize<total){offset+=pageSize;loadEvents()}};
+$('closeDetail').onclick=()=>$('detailPanel').hidden=true;
+$('query').addEventListener('keydown',e=>{if(e.key==='Enter'){offset=0;loadEvents()}});$('requestId').addEventListener('keydown',e=>{if(e.key==='Enter'){offset=0;loadEvents()}});
+(async()=>{try{await api('/api/health');$('status').textContent='API подключён. Папка для импорта: data/inbox';await loadSources();await loadEvents()}catch(e){$('status').textContent='Не удалось подключиться к API: '+e.message}})();
+</script>
+</body>
+</html>

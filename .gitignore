@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+.pytest_cache/
+node_modules/
+
+# Ignore heavy load test data dumps in git, keep samples
+data/inbox/20261014_1625_BOOMQ_LOAD_TEST/
+data/logscope.sqlite3*
