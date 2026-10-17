@@ -3,122 +3,2465 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LogScope</title>
+<title>LogScope — Анализатор логов</title>
 <style>
-:root{color-scheme:dark;--bg:#101318;--panel:#191e26;--panel2:#202733;--text:#e7ebf0;--muted:#9ca8b8;--border:#303a48;--accent:#5eead4;--danger:#fb7185;--warn:#fbbf24}
-:root[data-theme="light"]{color-scheme:light;--bg:#f4f6f9;--panel:#fff;--panel2:#edf1f5;--text:#17202b;--muted:#5c6877;--border:#d5dde6;--accent:#0f766e;--danger:#be123c;--warn:#a16207}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;z-index:2}
-.brand{font-size:20px;font-weight:750;letter-spacing:-.5px}.brand span{color:var(--accent)}.grow{flex:1}
-button,input,select{font:inherit;border:1px solid var(--border);border-radius:8px;padding:9px 11px;background:var(--panel);color:var(--text)}
-button{cursor:pointer}button.primary{background:var(--accent);color:#062d29;border-color:transparent;font-weight:700}
-main{max-width:1500px;margin:auto;padding:18px;display:grid;gap:14px}
-.panel{border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:14px;min-width:0}
-.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted)}.small{font-size:12px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:var(--panel2);padding:12px;border-radius:9px}.stat b{font-size:19px;display:block}
-.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px}.sources{display:grid;gap:7px;margin-top:12px}.source{padding:10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;overflow-wrap:anywhere}.source.active{border-color:var(--accent);background:var(--panel2)}
-.event-list{display:grid;gap:7px;margin-top:12px}.event{border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;min-width:0}.event:hover{border-color:var(--accent)}.event-head{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.time{font-variant-numeric:tabular-nums;color:var(--accent);white-space:nowrap}.level{font-weight:800}.ERROR,.FATAL,.CRITICAL{color:var(--danger)}.WARN{color:var(--warn)}.message{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:5px}.empty{padding:28px;text-align:center;color:var(--muted)}
-input[type="datetime-local"]{min-width:220px}#status{white-space:pre-wrap}.theme{min-width:100px}
-@media(max-width:850px){.layout{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding:12px}main{padding:10px}}
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel2: #21262d;
+  --text: #f0f6fc;
+  --text-dim: #c9d1d9;
+  --muted: #8b949e;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --accent-dim: #1f6feb33;
+  --accent-text: #79c0ff;
+  --danger: #f85149;
+  --danger-bg: #da363326;
+  --warn: #d29922;
+  --warn-bg: #bb800926;
+  --info: #388bfd;
+  --info-bg: #1f6feb26;
+  --success: #3fb950;
+  --success-bg: #23863626;
+  --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Segoe UI Mono", Menlo, Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --panel2: #eaeef2;
+  --text: #1f2328;
+  --text-dim: #3d444d;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --accent-dim: #ddf4ff;
+  --accent-text: #0550ae;
+  --danger: #cf222e;
+  --danger-bg: #ffebe9;
+  --warn: #9a6700;
+  --warn-bg: #fff8c5;
+  --info: #0969da;
+  --info-bg: #ddf4ff;
+  --success: #1a7f37;
+  --success-bg: #dafbe1;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.brand span { color: var(--accent); }
+.badge {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-weight: 600;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.grow { flex: 1; }
+
+button, input, select {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--panel2);
+  color: var(--text);
+  outline: none;
+}
+button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover { background: var(--border); }
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+button.primary:hover { opacity: 0.9; }
+button.danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+button.sm { padding: 4px 8px; font-size: 12px; }
+
+input:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+main {
+  max-width: 1750px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px 24px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px 16px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+/* Progress bar */
+.progress-container {
+  height: 5px;
+  background: var(--panel2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+  display: none;
+}
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+/* Stats */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.stat-card b {
+  font-size: 18px;
+  display: block;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Main Layout - Spacious, tall, and non-cramped */
+.layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 80px);
+  min-height: 650px;
+  max-height: calc(100vh - 80px);
+  background: var(--panel);
+}
+
+.source-search {
+  margin-top: 8px;
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* Category Filter Tabs in Sidebar */
+.source-category-tabs {
+  display: flex;
+  gap: 3px;
+  margin-top: 8px;
+  background: var(--panel2);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.source-cat-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.source-cat-btn:hover { color: var(--text); }
+.source-cat-btn.active {
+  background: var(--panel);
+  color: var(--accent-text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Source Section Groups (Log vs CSV vs Other) */
+.source-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  user-select: none;
+}
+.source-section-header:hover {
+  border-color: var(--accent);
+}
+.source-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+.source-section-arrow {
+  font-size: 10px;
+  transition: transform 0.15s;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.source-section.collapsed .source-section-arrow {
+  transform: rotate(-90deg);
+}
+.source-section.collapsed .source-section-items {
+  display: none;
+}
+.source-section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.source-item {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel2);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.source-item:hover { border-color: var(--accent); }
+.source-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.source-item input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.source-info { flex: 1; min-width: 0; }
+.source-title { font-weight: 600; overflow-wrap: anywhere; }
+
+.source-only-btn {
+  opacity: 0;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.source-item:hover .source-only-btn {
+  opacity: 1;
+}
+.source-only-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-dim);
+}
+
+/* Main Content Panel */
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  min-height: 750px;
+}
+
+/* Tab Group */
+.tab-group {
+  display: flex;
+  gap: 4px;
+  background: var(--panel2);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  background: var(--panel);
+  color: var(--accent-text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.main-panel-tabs {
+  position: sticky;
+  top: 52px;
+  background: var(--panel);
+  z-index: 40;
+  padding: 4px 0 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.slice-toolbar {
+  position: sticky;
+  top: 104px;
+  background: var(--panel);
+  z-index: 39;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Event List Area - Spacious and long */
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  flex: 1;
+}
+
+.event-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.event-card:hover { border-color: var(--accent); }
+.event-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.event-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.event-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lvl-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.lvl-ERROR, .lvl-FATAL, .lvl-CRITICAL { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+.lvl-WARN { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.lvl-INFO { background: var(--info-bg); color: var(--info); border: 1px solid var(--info); }
+.lvl-DEBUG, .lvl-TRACE { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+.lvl-NONE { background: var(--panel2); color: var(--muted); border: 1px dashed var(--border); }
+
+.http-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.http-5xx { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+.http-4xx { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.http-3xx { background: var(--info-bg); color: var(--info); border: 1px solid var(--info); }
+.http-2xx { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+
+/* Dropdown popovers with checkboxes */
+.filter-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.filter-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 6px 11px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+.filter-dropdown-btn:hover {
+  border-color: var(--accent);
+}
+.filter-dropdown-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.filter-dropdown-btn .filter-arrow {
+  font-size: 9px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.filter-dropdown-btn.open .filter-arrow {
+  transform: rotate(180deg);
+}
+
+.filter-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  min-width: 290px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+  z-index: 200;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.filter-quick-actions {
+  display: flex;
+  gap: 4px;
+}
+button.xs {
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+button.xs:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.filter-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.filter-opt-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+  transition: background 0.12s;
+}
+.filter-opt-item:hover {
+  background: var(--panel2);
+}
+.filter-opt-item input[type="checkbox"] {
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.filter-section-caption {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 6px 6px 2px;
+  letter-spacing: 0.5px;
+}
+
+/* Active filter pills bar */
+.active-filters-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.active-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.active-filter-pill button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+.event-msg {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.req-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Time Slice Snapshot View (Variant A) - Spacious cards */
+.slice-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  flex: 1;
+}
+
+.slice-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.slice-card:hover {
+  border-color: var(--accent);
+}
+.slice-card.exact {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+.slice-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.delta-badge {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.delta-exact { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+.delta-near { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.delta-none { background: var(--panel2); color: var(--muted); border: 1px dashed var(--border); }
+
+button.delta-jump-btn {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s, border-color 0.15s;
+}
+button.delta-jump-btn:hover {
+  filter: brightness(1.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--warn);
+  transform: translateY(-1px);
+}
+button.delta-jump-btn:active {
+  transform: translateY(0);
+}
+
+/* Modal / Drawer */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+  display: none;
+}
+.modal-drawer {
+  width: min(850px, 95vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.4);
+}
+.modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.modal-body {
+  padding: 18px;
+  overflow-y: auto;
+  flex: 1;
+  display: grid;
+  gap: 16px;
+}
+
+.code-viewer {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  padding: 6px 0;
+}
+.code-line {
+  display: flex;
+  padding: 1px 12px;
+}
+.code-line.target {
+  background: var(--accent-dim);
+  font-weight: 600;
+  border-left: 3px solid var(--accent);
+}
+.line-num {
+  width: 50px;
+  color: var(--muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+.line-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.empty-box {
+  padding: 30px;
+  text-align: center;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar-panel { position: static; height: 500px; max-height: 500px; }
+  .main-panel-tabs, .slice-toolbar { position: static; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">Log<span>Scope</span></div><div class="muted small">Локальный исследователь логов</div><div class="grow"></div>
-  <button id="themeBtn" class="theme">☀ Светлая</button>
+  <div class="brand">Log<span>Scope</span> <span class="badge">MVP 0.2</span></div>
+  <div class="muted small" id="headerInfo">Локальный синхронный анализатор</div>
+  <div class="grow"></div>
+  <button id="themeToggle" class="sm" title="Переключить тему">☀ Светлая</button>
 </header>
+
 <main>
+  <!-- Indexing Panel -->
   <section class="panel">
     <div class="row">
-      <div style="flex:1;min-width:240px"><b>Импорт набора</b><div class="muted small">Положите файлы в data/inbox и укажите путь к папке внутри неё.</div></div>
-      <input id="folder" style="flex:1;min-width:250px" value="./data/inbox" aria-label="Путь к папке">
-      <button class="primary" id="importBtn">Импортировать</button>
+      <div style="min-width: 200px;">
+        <b>Индексация папки</b>
+        <div class="muted small">Каталог <code>data/inbox</code></div>
+      </div>
+      <input id="folderPath" style="flex: 1; min-width: 240px;" value="./data/inbox" placeholder="Путь к папке логов">
+      <button class="primary sm" id="btnImport">Импортировать</button>
+      <button class="danger sm" id="btnCancel" style="display: none;">Отменить</button>
     </div>
-    <div id="status" class="muted small" style="margin-top:10px">Ожидание подключения к API…</div>
+    <div class="progress-container" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="row" style="margin-top: 6px;">
+      <span id="importStatus" class="muted small">Готов к работе.</span>
+      <div class="grow"></div>
+      <span id="importCounts" class="muted small"></span>
+    </div>
   </section>
-  <section class="stats">
-    <div class="stat"><span class="muted small">Источники</span><b id="sourceCount">0</b></div>
-    <div class="stat"><span class="muted small">События в индексе</span><b id="eventCount">0</b></div>
-    <div class="stat"><span class="muted small">С временной меткой</span><b id="timedCount">—</b></div>
-    <div class="stat"><span class="muted small">Текущая выборка</span><b id="resultCount">0</b></div>
+
+  <!-- Stats Grid -->
+  <section class="stats-grid">
+    <div class="stat-card"><span class="muted small">Источники</span><b id="statSources">0</b></div>
+    <div class="stat-card"><span class="muted small">Всего событий</span><b id="statEvents">0</b></div>
+    <div class="stat-card"><span class="muted small">С временной меткой</span><b id="statTimed">0</b></div>
+    <div class="stat-card"><span class="muted small">В выборке</span><b id="statFiltered">0</b></div>
   </section>
+
+  <!-- Filter & Search Panel -->
   <section class="panel">
     <div class="row">
-      <b>Временной диапазон</b>
-      <label class="small muted">От <input id="start" type="datetime-local" step="0.001"></label>
-      <label class="small muted">До <input id="end" type="datetime-local" step="0.001"></label>
-      <button id="applyTime">Применить</button><button id="clearTime">Сбросить</button>
+      <b>Интервал времени:</b>
+      <label class="small muted">От <input id="filterStart" type="datetime-local" step="0.001"></label>
+      <label class="small muted">До <input id="filterEnd" type="datetime-local" step="0.001"></label>
+      <button id="btnSliceFromInput" class="sm primary" title="Открыть синхронный срез всех источников на время 'От'">⏱ Срез времени</button>
+      <button id="btnQuick1s" class="sm">±1 сек</button>
+      <button id="btnQuick10s" class="sm">±10 сек</button>
+      <button id="btnQuick1m" class="sm">±1 мин</button>
+      <button id="btnResetTime" class="sm">Сброс времени</button>
     </div>
-    <div class="row" style="margin-top:12px">
-      <input id="query" placeholder="Поиск по тексту…" style="flex:1;min-width:200px">
-      <select id="level"><option value="">Все уровни</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select>
-      <input id="requestId" placeholder="Request ID">
-      <button id="searchBtn" class="primary">Найти</button>
+    <div class="row" style="margin-top: 8px;">
+      <input id="filterQuery" placeholder="Полнотекстовый поиск по сообщению…" style="flex: 1; min-width: 200px;">
+
+      <!-- Multi-select Levels Dropdown with Checkboxes -->
+      <div class="filter-dropdown-wrap" id="wrapFilterLevels">
+        <button type="button" class="filter-dropdown-btn" id="btnToggleFilterLevels">
+          <span class="muted small">Уровни:</span>
+          <span id="labelFilterLevels">Все</span>
+          <span class="filter-arrow">▼</span>
+        </button>
+        <div class="filter-dropdown-menu" id="menuFilterLevels" style="display: none;">
+          <div class="filter-menu-header">
+            <b>Уровни (галочки)</b>
+            <div class="filter-quick-actions">
+              <button type="button" class="xs" id="btnLevelsSelectAll">Все</button>
+              <button type="button" class="xs" id="btnLevelsOnlyErrors">Ошибки</button>
+              <button type="button" class="xs" id="btnLevelsClear">Снять</button>
+            </div>
+          </div>
+          <div class="filter-options-list">
+            <label class="filter-opt-item">
+              <input type="checkbox" value="ERROR" class="chk-level" checked>
+              <span class="lvl-badge lvl-ERROR">ERROR</span>
+              <span>ERROR / FATAL / CRITICAL</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="WARN" class="chk-level" checked>
+              <span class="lvl-badge lvl-WARN">WARN</span>
+              <span>WARN / WARNING</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="INFO" class="chk-level" checked>
+              <span class="lvl-badge lvl-INFO">INFO</span>
+              <span>INFO</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="DEBUG" class="chk-level" checked>
+              <span class="lvl-badge lvl-DEBUG">DEBUG</span>
+              <span>DEBUG / TRACE</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="NONE" class="chk-level" checked>
+              <span class="lvl-badge lvl-NONE">NONE</span>
+              <span>Без уровня (CSV / Plain)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Multi-select HTTP Codes Dropdown with Checkboxes -->
+      <div class="filter-dropdown-wrap" id="wrapFilterHttp">
+        <button type="button" class="filter-dropdown-btn" id="btnToggleFilterHttp">
+          <span class="muted small">HTTP:</span>
+          <span id="labelFilterHttp">Все</span>
+          <span class="filter-arrow">▼</span>
+        </button>
+        <div class="filter-dropdown-menu" id="menuFilterHttp" style="display: none;">
+          <div class="filter-menu-header">
+            <b>HTTP коды (галочки)</b>
+            <div class="filter-quick-actions">
+              <button type="button" class="xs" id="btnHttpSelectAll">Все</button>
+              <button type="button" class="xs" id="btnHttpOnlyErrors">4xx+5xx</button>
+              <button type="button" class="xs" id="btnHttpOnly5xx">5xx</button>
+              <button type="button" class="xs" id="btnHttpClear">Снять</button>
+            </div>
+          </div>
+          <div class="filter-options-list">
+            <div class="filter-section-caption">Классы кодов:</div>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="5xx" class="chk-http-class" checked>
+              <span class="http-badge http-5xx">5xx</span>
+              <span>Ошибки сервера (500, 502, 503...)</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="4xx" class="chk-http-class" checked>
+              <span class="http-badge http-4xx">4xx</span>
+              <span>Ошибки клиента (400, 401, 404...)</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="3xx" class="chk-http-class" checked>
+              <span class="http-badge http-3xx">3xx</span>
+              <span>Редиректы (301, 302, 304...)</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="2xx" class="chk-http-class" checked>
+              <span class="http-badge http-2xx">2xx</span>
+              <span>Успешные (200, 201, 204...)</span>
+            </label>
+
+            <div class="filter-section-caption">Точные частые коды:</div>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="500" class="chk-http-code">
+              <span class="http-badge http-5xx">500</span>
+              <span>Internal Server Error</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="404" class="chk-http-code">
+              <span class="http-badge http-4xx">404</span>
+              <span>Not Found</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="400" class="chk-http-code">
+              <span class="http-badge http-4xx">400</span>
+              <span>Bad Request</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="401" class="chk-http-code">
+              <span class="http-badge http-4xx">401 / 403</span>
+              <span>Unauthorized / Forbidden</span>
+            </label>
+            <label class="filter-opt-item">
+              <input type="checkbox" value="200" class="chk-http-code">
+              <span class="http-badge http-2xx">200</span>
+              <span>OK</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <input id="filterRequestId" placeholder="Request / Trace ID" style="width: 160px;">
+      <button class="primary sm" id="btnSearch">Применить</button>
+      <button id="btnResetFilters" class="sm">Сбросить всё</button>
+    </div>
+    <div class="active-filters-bar" id="activeFiltersBar" style="display: none;"></div>
+  </section>
+
+  <!-- Correlation Active Banner -->
+  <section class="panel" id="correlationBanner" style="display: none; border-color: var(--accent); background: var(--accent-dim);">
+    <div class="row">
+      <div>
+        <b>Корреляция по Request ID: <span id="corrIdText" class="req-pill"></span></b>
+        <div class="small muted" id="corrSummaryText" style="margin-top: 2px;"></div>
+      </div>
+      <div class="grow"></div>
+      <button class="sm" id="btnCloseCorrelation">Сбросить корреляцию</button>
     </div>
   </section>
+
+  <!-- Main 2-column Layout: Sources & Events / Slice -->
   <section class="layout">
-    <aside class="panel">
-      <b>Источники</b><div class="muted small">Выберите источник или «Все».</div>
-      <div class="sources" id="sources"><div class="empty">Нет источников</div></div>
+    <!-- Sources Sidebar (Full Height!) -->
+    <aside class="panel sidebar-panel">
+      <div class="row">
+        <b>Источники</b>
+        <div class="grow"></div>
+        <button class="sm" id="btnToggleAllSources" title="Выбрать все или снять со всех источников">Все</button>
+      </div>
+      <input id="sourceFilterQuery" class="source-search" placeholder="Фильтр по названию…">
+      <div class="source-category-tabs" id="sourceCategoryTabs">
+        <button class="source-cat-btn active" data-cat="all" id="btnCatAll">Все (<span id="catCountAll">0</span>)</button>
+        <button class="source-cat-btn" data-cat="log" id="btnCatLog">📁 Логи (<span id="catCountLog">0</span>)</button>
+        <button class="source-cat-btn" data-cat="csv" id="btnCatCsv">📊 CSV (<span id="catCountCsv">0</span>)</button>
+        <button class="source-cat-btn" data-cat="other" id="btnCatOther" style="display: none;">⏱ Другие (<span id="catCountOther">0</span>)</button>
+      </div>
+      <div class="source-list" id="sourceList">
+        <div class="empty-box"><div class="small">Нет данных</div></div>
+      </div>
     </aside>
-    <section class="panel">
-      <div class="row"><b>Хронология событий</b><div class="grow"></div><span id="pageInfo" class="muted small"></span></div>
-      <div id="events" class="event-list"><div class="empty">Импортируйте папку с логами, чтобы начать.</div></div>
-      <div class="row" style="justify-content:center;margin-top:12px"><button id="prevBtn">← Назад</button><button id="nextBtn">Далее →</button></div>
+
+    <!-- Main View (Chronology OR Time Slice) -->
+    <section class="panel main-panel">
+      <!-- Tabs Header -->
+      <div class="row main-panel-tabs">
+        <div class="tab-group">
+          <button id="tabChronology" class="tab-btn active">≡ Хронология событий</button>
+          <button id="tabSlice" class="tab-btn">⏱ Срез по источникам</button>
+        </div>
+        <div class="grow"></div>
+        <div id="chronoPaginationTop" class="row" style="gap: 4px;">
+          <button id="btnPrevPageTop" class="sm" title="Предыдущая страница">←</button>
+          <span class="muted small" id="pageNumberTextTop" style="padding: 0 4px; font-weight: 600;">1</span>
+          <button id="btnNextPageTop" class="sm" title="Следующая страница">→</button>
+        </div>
+        <span class="muted small" id="viewModeInfo">0 найдено</span>
+      </div>
+
+      <!-- Chronology View -->
+      <div id="chronologyView" style="display: flex; flex-direction: column; flex: 1;">
+        <div class="event-list" id="eventList">
+          <div class="empty-box">
+            <b>Нет событий для отображения</b>
+            <div class="small">Импортируйте каталог или скорректируйте фильтры.</div>
+          </div>
+        </div>
+        <div class="row" style="justify-content: center; margin-top: 14px; padding: 12px 0;">
+          <button id="btnPrevPage" class="sm">← Назад</button>
+          <span class="muted small" id="pageNumberText" style="padding: 0 10px; font-weight: 600;">1</span>
+          <button id="btnNextPage" class="sm">Далее →</button>
+        </div>
+      </div>
+
+      <!-- Time Slice View (Variant A) -->
+      <div id="sliceView" style="display: none; flex-direction: column; flex: 1;">
+        <div class="row slice-toolbar">
+          <div>
+            <span class="muted small">Срез на момент:</span>
+            <b id="sliceTimeLabel" style="font-family: var(--font-mono); margin-left: 6px;">—</b>
+          </div>
+          <div class="grow"></div>
+          <button id="btnSliceStepPrev1s" class="sm" title="Сдвиг на 1 секунду назад">← -1 с</button>
+          <button id="btnSliceStepPrev" class="sm" title="К предыдущему событию в логах">← Пред. событие</button>
+          <button id="btnSliceStepNext" class="sm" title="К следующему событию в логах">След. событие →</button>
+          <button id="btnSliceStepNext1s" class="sm" title="Сдвиг на 1 секунду вперёд">+1 с →</button>
+        </div>
+
+        <div class="slice-container" id="sliceList">
+          <div class="empty-box">
+            <b>Выберите момент времени для формирования среза</b>
+            <div class="small">Нажмите кнопку «⏱ Срез» у любого события или укажите время «От».</div>
+          </div>
+        </div>
+      </div>
     </section>
   </section>
-  <section class="panel" id="detailPanel" hidden>
-    <div class="row"><b>Детали события</b><div class="grow"></div><button id="closeDetail">Закрыть</button></div>
-    <pre id="detail" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-  </section>
 </main>
+
+<!-- Detail & Context Drawer -->
+<div class="modal-overlay" id="detailDrawer">
+  <div class="modal-drawer">
+    <div class="modal-header">
+      <b style="font-size: 15px;">Детали события #<span id="detailId"></span></b>
+      <div class="grow"></div>
+      <button class="sm" id="btnCloseDrawer">✕ Закрыть</button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <div class="muted small">Источник и строки:</div>
+        <div id="detailSource" style="font-weight: 600; font-family: var(--font-mono);"></div>
+      </div>
+      <div>
+        <div class="muted small">Временная метка:</div>
+        <div id="detailTime" style="font-family: var(--font-mono);"></div>
+      </div>
+      <div id="detailReqGroup" style="display: none;">
+        <div class="muted small">Request ID:</div>
+        <div class="row" style="margin-top: 4px;">
+          <span id="detailReqId" class="req-pill"></span>
+          <button class="sm primary" id="btnFindRelated">🔍 Найти связанные события</button>
+        </div>
+      </div>
+      <div>
+        <div class="muted small">Сообщение:</div>
+        <pre id="detailMessage" class="code-viewer" style="padding: 10px;"></pre>
+      </div>
+      <div id="detailFieldsGroup" style="display: none;">
+        <div class="muted small">Распознанные поля:</div>
+        <pre id="detailFields" class="code-viewer" style="padding: 10px;"></pre>
+      </div>
+      <div>
+        <div class="row">
+          <div class="muted small">Контекст файла (исходные строки):</div>
+          <div class="grow"></div>
+          <button class="sm" id="btnLoadContext">Загрузить контекст ±10 строк</button>
+        </div>
+        <div class="code-viewer" id="contextViewer" style="margin-top: 6px; display: none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
+// State
+const state = {
+  theme: localStorage.getItem('logscope-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+  sources: [],
+  selectedSourceIds: new Set(),
+  sourceCategoryFilter: 'all', // 'all' | 'log' | 'csv' | 'other'
+  collapsedSections: new Set(),
+  activeEventId: null,
+  activeEvent: null,
+  currentView: 'chronology', // 'chronology' | 'slice'
+  sliceTargetTimeMs: null,
+  slicePrevTimeMs: null,
+  sliceNextTimeMs: null,
+  selectedLevels: new Set(['ERROR', 'WARN', 'INFO', 'DEBUG', 'NONE']),
+  selectedHttpClasses: new Set(['5xx', '4xx', '3xx', '2xx']),
+  selectedHttpCodes: new Set(),
+  offset: 0,
+  pageSize: 200,
+  total: 0,
+  pollTimer: null,
+};
+
 const $ = id => document.getElementById(id);
-let activeSource = null, offset = 0, pageSize = 200, total = 0, sources = [];
-function theme(t){document.documentElement.dataset.theme=t;localStorage.setItem('logscope-theme',t);$('themeBtn').textContent=t==='dark'?'☀ Светлая':'☾ Тёмная'}
-theme(localStorage.getItem('logscope-theme')||'dark');
-$('themeBtn').onclick=()=>theme(document.documentElement.dataset.theme==='dark'?'light':'dark');
-function fmt(ms){if(ms==null)return 'время не определено';return new Date(ms).toLocaleString('ru-RU',{hour12:false})}
-function isoInputToMs(value){if(!value)return null;const d=new Date(value);return Number.isNaN(d.getTime())?null:d.getTime()}
-function msToInput(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`}
-async function api(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
-async function loadSources(){
-  sources=await api('/api/sources');
-  $('sources').innerHTML='';
-  const all=document.createElement('div');all.className='source'+(activeSource===null?' active':'');all.textContent='◉ Все источники';all.onclick=()=>{activeSource=null;offset=0;renderSources();loadEvents()};$('sources').append(all);
-  for(const s of sources){const el=document.createElement('div');el.className='source'+(activeSource===s.id?' active':'');el.innerHTML=`<b></b><div class="muted small"></div><div class="muted small"></div>`;el.children[0].textContent=s.name;el.children[1].textContent=`${s.event_count} событий · ${s.size_bytes.toLocaleString()} байт`;el.children[2].textContent=s.min_time_ms==null?'Время не определено':`${fmt(s.min_time_ms)} — ${fmt(s.max_time_ms)}`;el.onclick=()=>{activeSource=s.id;offset=0;renderSources();loadEvents()};$('sources').append(el)}
-  $('sourceCount').textContent=sources.length;$('eventCount').textContent=sources.reduce((a,s)=>a+s.event_count,0).toLocaleString();
-  $('timedCount').textContent=sources.reduce((a,s)=>a+(s.min_time_ms==null?0:s.event_count),0).toLocaleString();
+
+// Theme handling
+function applyTheme(t) {
+  state.theme = t;
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('logscope-theme', t);
+  $('themeToggle').textContent = t === 'dark' ? '☀ Светлая' : '☾ Тёмная';
 }
-function renderSources(){const children=[...$('sources').children];children.forEach((el,i)=>el.classList.toggle('active',i===0?activeSource===null:sources[i-1]?.id===activeSource))}
-async function loadEvents(){
-  const p=new URLSearchParams({limit:pageSize,offset});
-  if(activeSource!==null)p.set('source_id',activeSource);
-  const start=isoInputToMs($('start').value),end=isoInputToMs($('end').value);
-  if(start!==null)p.set('start_ms',start);if(end!==null)p.set('end_ms',end);
-  if($('query').value.trim())p.set('q',$('query').value.trim());
-  if($('level').value)p.set('level',$('level').value);
-  if($('requestId').value.trim())p.set('request_id',$('requestId').value.trim());
-  try{
-    const data=await api('/api/events?'+p.toString());total=data.total;$('resultCount').textContent=total.toLocaleString();$('pageInfo').textContent=`${total.toLocaleString()} найдено · ${offset+1}–${Math.min(offset+pageSize,total)}`;
-    const list=$('events');list.innerHTML='';
-    if(!data.items.length){list.innerHTML='<div class="empty">Событий по заданным условиям не найдено.</div>';return}
-    for(const e of data.items){const el=document.createElement('div');el.className='event';const head=document.createElement('div');head.className='event-head';
-      const t=document.createElement('span');t.className='time';t.textContent=fmt(e.timestamp_ms);
-      const src=document.createElement('span');src.className='muted small';src.textContent=e.source_name;
-      const lev=document.createElement('span');lev.className='level '+(e.level||'');lev.textContent=e.level||'EVENT';
-      const line=document.createElement('span');line.className='muted small';line.textContent=`строка ${e.line_start}`;
-      head.append(t,lev,src,line);const msg=document.createElement('div');msg.className='message';msg.textContent=e.message;
-      el.append(head,msg);el.onclick=()=>showDetail(e.id);list.append(el)
+applyTheme(state.theme);
+$('themeToggle').onclick = () => applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+
+// API helper
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let msg = await res.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+    } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[m]);
+}
+
+function fmtTime(ms) {
+  if (ms == null) return 'время не определено';
+  const d = new Date(ms);
+  return d.toLocaleString('ru-RU', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+function msToLocalInput(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function inputToMs(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+// Tab Switching
+function switchView(mode) {
+  state.currentView = mode;
+  $('tabChronology').classList.toggle('active', mode === 'chronology');
+  $('tabSlice').classList.toggle('active', mode === 'slice');
+  $('chronologyView').style.display = mode === 'chronology' ? 'flex' : 'none';
+  $('sliceView').style.display = mode === 'slice' ? 'flex' : 'none';
+  $('chronoPaginationTop').style.display = (mode === 'chronology') ? 'inline-flex' : 'none';
+
+  if (mode === 'slice') {
+    if (!state.sliceTargetTimeMs) {
+      const inputTime = inputToMs($('filterStart').value);
+      if (inputTime) {
+        openSliceAtTime(inputTime);
+      } else if (state.activeEvent && state.activeEvent.timestamp_utc_ms) {
+        openSliceAtTime(state.activeEvent.timestamp_utc_ms);
+      } else {
+        const timedSrc = state.sources.find(s => s.min_time_ms != null);
+        if (timedSrc) openSliceAtTime(timedSrc.min_time_ms);
+      }
+    } else {
+      loadSlice();
     }
-  }catch(err){$('status').textContent='Ошибка API: '+err.message}
+  } else {
+    loadEvents();
+  }
 }
-async function showDetail(id){const d=await api('/api/events/'+id);$('detailPanel').hidden=false;$('detail').textContent=JSON.stringify(d,null,2);$('detailPanel').scrollIntoView({behavior:'smooth',block:'nearest'})}
-$('importBtn').onclick=async()=>{try{$('status').textContent='Импорт выполняется…';const r=await api('/api/import/path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('folder').value})});const counts=r.files.reduce((a,f)=>{a[f.status]=(a[f.status]||0)+1;return a},{});$('status').textContent=`Импорт завершён: ${JSON.stringify(counts)}\n`+r.files.filter(f=>f.status==='error'||f.status==='skipped').map(f=>`${f.path}: ${f.reason}`).join('\n');offset=0;await loadSources();await loadEvents()}catch(err){$('status').textContent='Ошибка импорта: '+err.message}};
-$('searchBtn').onclick=()=>{offset=0;loadEvents()};$('applyTime').onclick=()=>{offset=0;loadEvents()};$('clearTime').onclick=()=>{$('start').value='';$('end').value='';offset=0;loadEvents()};
-$('prevBtn').onclick=()=>{offset=Math.max(0,offset-pageSize);loadEvents()};$('nextBtn').onclick=()=>{if(offset+pageSize<total){offset+=pageSize;loadEvents()}};
-$('closeDetail').onclick=()=>$('detailPanel').hidden=true;
-$('query').addEventListener('keydown',e=>{if(e.key==='Enter'){offset=0;loadEvents()}});$('requestId').addEventListener('keydown',e=>{if(e.key==='Enter'){offset=0;loadEvents()}});
-(async()=>{try{await api('/api/health');$('status').textContent='API подключён. Папка для импорта: data/inbox';await loadSources();await loadEvents()}catch(e){$('status').textContent='Не удалось подключиться к API: '+e.message}})();
+
+$('tabChronology').onclick = () => switchView('chronology');
+$('tabSlice').onclick = () => switchView('slice');
+
+// Helper: classify source into category
+function getSourceCategory(s) {
+  const name = (s.name || '').toLowerCase();
+  if (name.endsWith('.log') || name.endsWith('.txt')) return 'log';
+  if (name.endsWith('.csv')) return 'csv';
+  return 'other'; // .jtl, .xml, etc.
+}
+
+// Helper: get currently effective source IDs based on category filter & checkboxes
+function getEffectiveSourceIds() {
+  let pool = state.sources;
+  if (state.sourceCategoryFilter !== 'all') {
+    pool = pool.filter(s => getSourceCategory(s) === state.sourceCategoryFilter);
+  }
+  return pool.filter(s => state.selectedSourceIds.has(s.id)).map(s => s.id);
+}
+
+function toggleSource(id) {
+  if (state.selectedSourceIds.has(id)) {
+    state.selectedSourceIds.delete(id);
+  } else {
+    state.selectedSourceIds.add(id);
+  }
+  state.offset = 0;
+  renderSources();
+  onFilterChanged();
+}
+
+function selectOnlySource(id) {
+  state.selectedSourceIds = new Set([id]);
+  state.offset = 0;
+  renderSources();
+  onFilterChanged();
+}
+
+function toggleSectionSources(items, selectAll) {
+  if (selectAll) {
+    for (const s of items) state.selectedSourceIds.add(s.id);
+  } else {
+    for (const s of items) state.selectedSourceIds.delete(s.id);
+  }
+  state.offset = 0;
+  renderSources();
+  onFilterChanged();
+}
+
+// Sources rendering with Sections (Log vs CSV vs Other)
+function renderSources() {
+  const container = $('sourceList');
+  container.innerHTML = '';
+  const query = ($('sourceFilterQuery').value || '').toLowerCase().trim();
+
+  const allLogs = state.sources.filter(s => getSourceCategory(s) === 'log');
+  const allCsvs = state.sources.filter(s => getSourceCategory(s) === 'csv');
+  const allOthers = state.sources.filter(s => getSourceCategory(s) === 'other');
+
+  // Update category tab counters
+  if ($('catCountAll')) $('catCountAll').textContent = state.sources.length;
+  if ($('catCountLog')) $('catCountLog').textContent = allLogs.length;
+  if ($('catCountCsv')) $('catCountCsv').textContent = allCsvs.length;
+  if ($('btnCatOther')) {
+    if (allOthers.length > 0) {
+      $('btnCatOther').style.display = 'block';
+      $('catCountOther').textContent = allOthers.length;
+    } else {
+      $('btnCatOther').style.display = 'none';
+    }
+  }
+
+  // Update top "Все / Снять все" button according to current category view
+  const currentCategorySources = (state.sourceCategoryFilter === 'all')
+    ? state.sources
+    : state.sources.filter(s => getSourceCategory(s) === state.sourceCategoryFilter);
+
+  const allPoolSelected = currentCategorySources.length > 0 && currentCategorySources.every(s => state.selectedSourceIds.has(s.id));
+  const anyPoolSelected = currentCategorySources.some(s => state.selectedSourceIds.has(s.id));
+
+  const btnToggleAll = $('btnToggleAllSources');
+  if (btnToggleAll) {
+    if (allPoolSelected) {
+      btnToggleAll.textContent = 'Снять все';
+      btnToggleAll.title = 'Снять выбор со всех источников в текущем разделе';
+    } else if (!anyPoolSelected) {
+      btnToggleAll.textContent = 'Выбрать все';
+      btnToggleAll.title = 'Выбрать все источники в текущем разделе';
+    } else {
+      btnToggleAll.textContent = 'Все';
+      btnToggleAll.title = 'Выбрать все источники в текущем разделе';
+    }
+  }
+
+  const sectionsDef = [
+    { key: 'log', title: 'Логи (.log, .txt)', icon: '📁', items: allLogs },
+    { key: 'csv', title: 'Метрики и таблицы (.csv)', icon: '📊', items: allCsvs },
+    { key: 'other', title: 'JMeter и прочие (.jtl)', icon: '⏱', items: allOthers },
+  ].filter(sec => {
+    if (state.sourceCategoryFilter !== 'all' && sec.key !== state.sourceCategoryFilter) {
+      return false;
+    }
+    return sec.items.length > 0;
+  });
+
+  let totalVisible = 0;
+
+  for (const sec of sectionsDef) {
+    const matchingItems = sec.items.filter(s => !query || s.name.toLowerCase().includes(query));
+    if (!matchingItems.length && query) continue;
+
+    totalVisible += matchingItems.length;
+
+    const secEl = document.createElement('div');
+    secEl.className = 'source-section' + (state.collapsedSections.has(sec.key) ? ' collapsed' : '');
+
+    const header = document.createElement('div');
+    header.className = 'source-section-header';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'source-section-title';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'source-section-arrow';
+    arrow.textContent = '▼';
+
+    const titleText = document.createElement('span');
+    titleText.innerHTML = `${sec.icon} <b>${escapeHtml(sec.title)}</b>`;
+
+    const selectedCount = matchingItems.filter(s => state.selectedSourceIds.has(s.id)).length;
+    const countBadge = document.createElement('span');
+    countBadge.className = 'badge';
+    countBadge.textContent = `${selectedCount} из ${matchingItems.length}`;
+    if (selectedCount > 0) {
+      countBadge.style.borderColor = 'var(--accent)';
+      countBadge.style.color = 'var(--accent-text)';
+    } else {
+      countBadge.style.borderColor = 'var(--border)';
+      countBadge.style.color = 'var(--muted)';
+    }
+
+    titleWrap.append(arrow, titleText, countBadge);
+    titleWrap.onclick = () => {
+      if (state.collapsedSections.has(sec.key)) {
+        state.collapsedSections.delete(sec.key);
+      } else {
+        state.collapsedSections.add(sec.key);
+      }
+      renderSources();
+    };
+
+    const allSecSelected = matchingItems.length > 0 && matchingItems.every(s => state.selectedSourceIds.has(s.id));
+    const btnSecToggle = document.createElement('button');
+    btnSecToggle.className = 'sm';
+    btnSecToggle.textContent = allSecSelected ? 'Снять' : 'Все';
+    btnSecToggle.title = allSecSelected
+      ? `Снять выбор со всех источников раздела "${sec.title}"`
+      : `Выбрать все источники раздела "${sec.title}"`;
+    btnSecToggle.onclick = (e) => {
+      e.stopPropagation();
+      toggleSectionSources(matchingItems, !allSecSelected);
+    };
+
+    header.append(titleWrap, btnSecToggle);
+    secEl.append(header);
+
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'source-section-items';
+
+    if (!matchingItems.length) {
+      itemsContainer.innerHTML = '<div class="muted small" style="padding: 6px 10px;">Нет подходящих файлов</div>';
+    } else {
+      for (const s of matchingItems) {
+        const item = document.createElement('div');
+        const isSelected = state.selectedSourceIds.has(s.id);
+        item.className = 'source-item' + (isSelected ? ' selected' : '');
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = isSelected;
+        chk.onclick = (e) => {
+          e.stopPropagation();
+          toggleSource(s.id);
+        };
+
+        const info = document.createElement('div');
+        info.className = 'source-info';
+        info.innerHTML = `
+          <div class="source-title">${escapeHtml(s.name)}</div>
+          <div class="muted small">${s.event_count.toLocaleString()} соб. · ${(s.size_bytes / 1024).toFixed(1)} КБ</div>
+          <div class="muted small">${s.min_time_ms ? fmtTime(s.min_time_ms) : 'Без времени'}</div>
+        `;
+
+        const btnOnly = document.createElement('button');
+        btnOnly.className = 'source-only-btn';
+        btnOnly.textContent = 'только';
+        btnOnly.title = 'Оставить выбранным только этот источник';
+        btnOnly.onclick = (e) => {
+          e.stopPropagation();
+          selectOnlySource(s.id);
+        };
+
+        item.append(chk, info, btnOnly);
+        item.onclick = () => toggleSource(s.id);
+        itemsContainer.append(item);
+      }
+    }
+
+    secEl.append(itemsContainer);
+    container.append(secEl);
+  }
+
+  if (totalVisible === 0) {
+    container.innerHTML = '<div class="empty-box"><div class="small">Нет подходящих источников</div></div>';
+  }
+}
+
+// Helper to extract HTTP status badge from event
+function getEventHttpBadge(e) {
+  let code = null;
+  if (e.fields_json) {
+    code = e.fields_json.responseCode || e.fields_json.status;
+  }
+  if (!code && e.message) {
+    const m = e.message.match(/HTTP\/[0-9.]+"\s+([0-9]{3})/i) ||
+              e.message.match(/status=([0-9]{3})/i) ||
+              e.message.match(/\[([0-9]{3})\s+[A-Za-z ]+\]/i) ||
+              e.message.match(/\s+([245][0-9]{2})\s+/);
+    if (m) code = m[1];
+  }
+  if (!code || isNaN(parseInt(code, 10))) return null;
+
+  code = String(code).trim();
+  let cls = 'http-2xx';
+  if (code.startsWith('5')) cls = 'http-5xx';
+  else if (code.startsWith('4')) cls = 'http-4xx';
+  else if (code.startsWith('3')) cls = 'http-3xx';
+
+  const badge = document.createElement('span');
+  badge.className = `http-badge ${cls}`;
+  badge.textContent = `HTTP ${code}`;
+  badge.title = `HTTP код ответа: ${code}`;
+  return badge;
+}
+
+// Dropdown UI updater functions
+function updateLevelFilterUI() {
+  const allLevels = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'NONE'];
+  const checked = allLevels.filter(lvl => state.selectedLevels.has(lvl));
+
+  document.querySelectorAll('.chk-level').forEach(chk => {
+    chk.checked = state.selectedLevels.has(chk.value);
+  });
+
+  const label = $('labelFilterLevels');
+  const btn = $('btnToggleFilterLevels');
+
+  if (checked.length === 5) {
+    label.textContent = 'Все';
+    btn.classList.remove('active');
+  } else if (checked.length === 0) {
+    label.textContent = 'Ничего';
+    btn.classList.add('active');
+  } else if (checked.length === 1 && checked[0] === 'ERROR') {
+    label.textContent = 'Только ошибки';
+    btn.classList.add('active');
+  } else if (checked.length <= 2) {
+    label.textContent = checked.join(', ');
+    btn.classList.add('active');
+  } else {
+    label.textContent = `${checked.length} выбр.`;
+    btn.classList.add('active');
+  }
+  renderActiveFiltersBar();
+}
+
+function updateHttpFilterUI() {
+  const allClasses = ['5xx', '4xx', '3xx', '2xx'];
+  const checkedClasses = allClasses.filter(c => state.selectedHttpClasses.has(c));
+  const checkedCodes = Array.from(state.selectedHttpCodes);
+
+  document.querySelectorAll('.chk-http-class').forEach(chk => {
+    chk.checked = state.selectedHttpClasses.has(chk.value);
+  });
+  document.querySelectorAll('.chk-http-code').forEach(chk => {
+    chk.checked = state.selectedHttpCodes.has(chk.value);
+  });
+
+  const label = $('labelFilterHttp');
+  const btn = $('btnToggleFilterHttp');
+  const isDefault = (checkedClasses.length === 4 && checkedCodes.length === 0);
+
+  if (isDefault) {
+    label.textContent = 'Все';
+    btn.classList.remove('active');
+  } else if (checkedClasses.length === 0 && checkedCodes.length === 0) {
+    label.textContent = 'Ничего';
+    btn.classList.add('active');
+  } else if (checkedClasses.length === 1 && checkedClasses[0] === '5xx' && checkedCodes.length === 0) {
+    label.textContent = '5xx';
+    btn.classList.add('active');
+  } else if (checkedClasses.length === 2 && state.selectedHttpClasses.has('5xx') && state.selectedHttpClasses.has('4xx') && checkedCodes.length === 0) {
+    label.textContent = '4xx, 5xx';
+    btn.classList.add('active');
+  } else {
+    const parts = [...checkedClasses, ...checkedCodes];
+    label.textContent = parts.length <= 2 ? parts.join(', ') : `${parts.length} выбр.`;
+    btn.classList.add('active');
+  }
+  renderActiveFiltersBar();
+}
+
+function renderActiveFiltersBar() {
+  const bar = $('activeFiltersBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  let count = 0;
+
+  // Levels
+  if (state.selectedLevels.size < 5) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    const names = Array.from(state.selectedLevels).join(', ') || 'пусто';
+    pill.innerHTML = `Уровни: ${escapeHtml(names)} <button title="Сбросить фильтр уровней">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      state.selectedLevels = new Set(['ERROR', 'WARN', 'INFO', 'DEBUG', 'NONE']);
+      updateLevelFilterUI();
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  // HTTP
+  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    const parts = [...state.selectedHttpClasses, ...state.selectedHttpCodes];
+    pill.innerHTML = `HTTP: ${escapeHtml(parts.join(', ') || 'пусто')} <button title="Сбросить фильтр HTTP">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      state.selectedHttpClasses = new Set(['5xx', '4xx', '3xx', '2xx']);
+      state.selectedHttpCodes.clear();
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  // Search Query
+  const q = $('filterQuery').value.trim();
+  if (q) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    pill.innerHTML = `Текст: "${escapeHtml(q)}" <button title="Очистить поиск">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      $('filterQuery').value = '';
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  // Request ID
+  const rid = $('filterRequestId').value.trim();
+  if (rid) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    pill.innerHTML = `Trace ID: ${escapeHtml(rid)} <button title="Очистить Request ID">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      $('filterRequestId').value = '';
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  // Sources category
+  if (state.sourceCategoryFilter !== 'all') {
+    count++;
+    const catName = state.sourceCategoryFilter === 'log' ? 'Логи' : (state.sourceCategoryFilter === 'csv' ? 'CSV' : 'Другие');
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    pill.innerHTML = `Раздел: ${catName} <button title="Показать все разделы">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      state.sourceCategoryFilter = 'all';
+      document.querySelectorAll('.source-cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'all'));
+      renderSources();
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  // Specific selected sources
+  const effectiveIds = getEffectiveSourceIds();
+  const pool = (state.sourceCategoryFilter === 'all')
+    ? state.sources
+    : state.sources.filter(s => getSourceCategory(s) === state.sourceCategoryFilter);
+
+  if (effectiveIds.length < pool.length) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    pill.innerHTML = `Источники: ${effectiveIds.length} из ${pool.length} <button title="Выбрать все источники в текущем разделе">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      for (const s of pool) {
+        state.selectedSourceIds.add(s.id);
+      }
+      renderSources();
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
+  if (count > 0) {
+    const btnClearAll = document.createElement('button');
+    btnClearAll.className = 'xs';
+    btnClearAll.textContent = 'Очистить все';
+    btnClearAll.onclick = () => $('btnResetFilters').click();
+    bar.append(btnClearAll);
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function onFilterChanged() {
+  state.offset = 0;
+  renderActiveFiltersBar();
+  if (state.currentView === 'slice') loadSlice();
+  else loadEvents();
+}
+
+function initFilterDropdowns() {
+  const btnLevels = $('btnToggleFilterLevels');
+  const menuLevels = $('menuFilterLevels');
+  const btnHttp = $('btnToggleFilterHttp');
+  const menuHttp = $('menuFilterHttp');
+
+  if (btnLevels && menuLevels) {
+    btnLevels.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = menuLevels.style.display === 'flex';
+      menuLevels.style.display = isOpen ? 'none' : 'flex';
+      btnLevels.classList.toggle('open', !isOpen);
+      if (menuHttp) { menuHttp.style.display = 'none'; $('btnToggleFilterHttp').classList.remove('open'); }
+    };
+    menuLevels.onclick = (e) => e.stopPropagation();
+  }
+
+  if (btnHttp && menuHttp) {
+    btnHttp.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = menuHttp.style.display === 'flex';
+      menuHttp.style.display = isOpen ? 'none' : 'flex';
+      btnHttp.classList.toggle('open', !isOpen);
+      if (menuLevels) { menuLevels.style.display = 'none'; $('btnToggleFilterLevels').classList.remove('open'); }
+    };
+    menuHttp.onclick = (e) => e.stopPropagation();
+  }
+
+  document.addEventListener('click', () => {
+    if (menuLevels) { menuLevels.style.display = 'none'; btnLevels.classList.remove('open'); }
+    if (menuHttp) { menuHttp.style.display = 'none'; btnHttp.classList.remove('open'); }
+  });
+
+  // Level quick action buttons
+  if ($('btnLevelsSelectAll')) {
+    $('btnLevelsSelectAll').onclick = () => {
+      state.selectedLevels = new Set(['ERROR', 'WARN', 'INFO', 'DEBUG', 'NONE']);
+      updateLevelFilterUI();
+      onFilterChanged();
+    };
+  }
+  if ($('btnLevelsOnlyErrors')) {
+    $('btnLevelsOnlyErrors').onclick = () => {
+      state.selectedLevels = new Set(['ERROR']);
+      updateLevelFilterUI();
+      onFilterChanged();
+    };
+  }
+  if ($('btnLevelsClear')) {
+    $('btnLevelsClear').onclick = () => {
+      state.selectedLevels.clear();
+      updateLevelFilterUI();
+      onFilterChanged();
+    };
+  }
+
+  // Level checkboxes
+  document.querySelectorAll('.chk-level').forEach(chk => {
+    chk.onchange = () => {
+      if (chk.checked) state.selectedLevels.add(chk.value);
+      else state.selectedLevels.delete(chk.value);
+      updateLevelFilterUI();
+      onFilterChanged();
+    };
+  });
+
+  // HTTP quick action buttons
+  if ($('btnHttpSelectAll')) {
+    $('btnHttpSelectAll').onclick = () => {
+      state.selectedHttpClasses = new Set(['5xx', '4xx', '3xx', '2xx']);
+      state.selectedHttpCodes.clear();
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  }
+  if ($('btnHttpOnlyErrors')) {
+    $('btnHttpOnlyErrors').onclick = () => {
+      state.selectedHttpClasses = new Set(['5xx', '4xx']);
+      state.selectedHttpCodes.clear();
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  }
+  if ($('btnHttpOnly5xx')) {
+    $('btnHttpOnly5xx').onclick = () => {
+      state.selectedHttpClasses = new Set(['5xx']);
+      state.selectedHttpCodes.clear();
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  }
+  if ($('btnHttpClear')) {
+    $('btnHttpClear').onclick = () => {
+      state.selectedHttpClasses.clear();
+      state.selectedHttpCodes.clear();
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  }
+
+  // HTTP checkboxes
+  document.querySelectorAll('.chk-http-class').forEach(chk => {
+    chk.onchange = () => {
+      if (chk.checked) state.selectedHttpClasses.add(chk.value);
+      else state.selectedHttpClasses.delete(chk.value);
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  });
+  document.querySelectorAll('.chk-http-code').forEach(chk => {
+    chk.onchange = () => {
+      if (chk.checked) state.selectedHttpCodes.add(chk.value);
+      else state.selectedHttpCodes.delete(chk.value);
+      updateHttpFilterUI();
+      onFilterChanged();
+    };
+  });
+}
+
+// Category Tabs Click Handlers
+function initCategoryTabs() {
+  document.querySelectorAll('.source-cat-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.source-cat-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.sourceCategoryFilter = btn.dataset.cat;
+      state.offset = 0;
+      renderSources();
+      onFilterChanged();
+    };
+  });
+}
+initCategoryTabs();
+
+$('sourceFilterQuery').oninput = renderSources;
+
+$('btnToggleAllSources').onclick = () => {
+  const currentCategorySources = (state.sourceCategoryFilter === 'all')
+    ? state.sources
+    : state.sources.filter(s => getSourceCategory(s) === state.sourceCategoryFilter);
+
+  const allPoolSelected = currentCategorySources.length > 0 && currentCategorySources.every(s => state.selectedSourceIds.has(s.id));
+
+  if (allPoolSelected) {
+    for (const s of currentCategorySources) state.selectedSourceIds.delete(s.id);
+  } else {
+    for (const s of currentCategorySources) state.selectedSourceIds.add(s.id);
+  }
+  state.offset = 0;
+  renderSources();
+  onFilterChanged();
+};
+
+async function loadSources() {
+  state.sources = await api('/api/sources');
+  const totalEvents = state.sources.reduce((a, s) => a + s.event_count, 0);
+  const timedEvents = state.sources.reduce((a, s) => a + (s.min_time_ms ? s.event_count : 0), 0);
+  $('statSources').textContent = state.sources.length;
+  $('statEvents').textContent = totalEvents.toLocaleString();
+  $('statTimed').textContent = timedEvents.toLocaleString();
+
+  // Initialize selectedSourceIds to ALL sources by default
+  if (state.selectedSourceIds.size === 0) {
+    state.selectedSourceIds = new Set(state.sources.map(s => s.id));
+  } else {
+    // Keep only valid existing IDs
+    const existingValid = new Set();
+    for (const s of state.sources) {
+      if (state.selectedSourceIds.has(s.id)) existingValid.add(s.id);
+    }
+    state.selectedSourceIds = existingValid;
+    if (state.selectedSourceIds.size === 0) {
+      state.selectedSourceIds = new Set(state.sources.map(s => s.id));
+    }
+  }
+
+  renderSources();
+}
+
+// Load Chronology Events
+async function loadEvents() {
+  const effectiveIds = getEffectiveSourceIds();
+
+  // If NO sources are selected
+  if (effectiveIds.length === 0) {
+    $('eventList').innerHTML = `
+      <div class="empty-box">
+        <b>Источники не выбраны</b>
+        <div class="small">Отметьте хотя бы один источник в левой панели, чтобы увидеть события.</div>
+      </div>
+    `;
+    $('statFiltered').textContent = '0';
+    $('viewModeInfo').textContent = '0 источников выбрано';
+    if ($('pageNumberText')) $('pageNumberText').textContent = '0';
+    if ($('pageNumberTextTop')) $('pageNumberTextTop').textContent = '0';
+    if ($('btnPrevPageTop')) $('btnPrevPageTop').disabled = true;
+    if ($('btnNextPageTop')) $('btnNextPageTop').disabled = true;
+    if ($('btnPrevPage')) $('btnPrevPage').disabled = true;
+    if ($('btnNextPage')) $('btnNextPage').disabled = true;
+    return;
+  }
+
+  const p = new URLSearchParams({ limit: state.pageSize, offset: state.offset });
+
+  if (effectiveIds.length < state.sources.length) {
+    p.set('source_ids', effectiveIds.join(','));
+  }
+
+  const startMs = inputToMs($('filterStart').value);
+  const endMs = inputToMs($('filterEnd').value);
+  if (startMs !== null) p.set('start_ms', startMs);
+  if (endMs !== null) p.set('end_ms', endMs);
+
+  const q = $('filterQuery').value.trim();
+  if (q) p.set('q', q);
+
+  // Multi-level filter
+  if (state.selectedLevels.size < 5) {
+    p.set('levels', Array.from(state.selectedLevels).join(',') || 'NONE_SELECTED');
+  }
+
+  // HTTP Codes filter
+  const checkedHttp = [];
+  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
+    checkedHttp.push(...state.selectedHttpClasses);
+    checkedHttp.push(...state.selectedHttpCodes);
+    p.set('http_codes', checkedHttp.join(',') || 'NONE_SELECTED');
+  }
+
+  const rid = $('filterRequestId').value.trim();
+  if (rid) p.set('request_id', rid);
+
+  try {
+    const data = await api('/api/events?' + p.toString());
+    state.total = data.total;
+    $('statFiltered').textContent = state.total.toLocaleString();
+    $('viewModeInfo').textContent = `${state.total.toLocaleString()} событий · ${state.offset + 1}–${Math.min(state.offset + state.pageSize, state.total)}`;
+    $('pageNumberText').textContent = Math.floor(state.offset / state.pageSize) + 1;
+    $('pageNumberTextTop').textContent = Math.floor(state.offset / state.pageSize) + 1;
+
+    const list = $('eventList');
+    list.innerHTML = '';
+
+    if (!data.items.length) {
+      list.innerHTML = '<div class="empty-box"><b>События не найдены</b><div class="small">Попробуйте расширить диапазон времени или сбросить фильтры.</div></div>';
+      return;
+    }
+
+    for (const e of data.items) {
+      const card = document.createElement('div');
+      card.className = 'event-card' + (state.activeEventId === e.id ? ' active' : '');
+
+      const header = document.createElement('div');
+      header.className = 'event-header';
+
+      const timeEl = document.createElement('span');
+      timeEl.className = 'event-time';
+      timeEl.textContent = fmtTime(e.timestamp_utc_ms);
+
+      const lvlEl = document.createElement('span');
+      const lvlStr = e.level || 'NONE';
+      lvlEl.className = `lvl-badge lvl-${lvlStr}`;
+      lvlEl.textContent = lvlStr;
+
+      const httpBadge = getEventHttpBadge(e);
+
+      const srcEl = document.createElement('span');
+      srcEl.className = 'badge';
+      srcEl.textContent = e.source_name;
+
+      const lineEl = document.createElement('span');
+      lineEl.className = 'muted small';
+      lineEl.textContent = `стр. ${e.line_start}${e.line_end > e.line_start ? '-' + e.line_end : ''}`;
+
+      header.append(timeEl, lvlEl);
+      if (httpBadge) header.append(httpBadge);
+      header.append(srcEl, lineEl);
+
+      if (e.request_id) {
+        const reqEl = document.createElement('span');
+        reqEl.className = 'req-pill';
+        reqEl.textContent = e.request_id;
+        reqEl.onclick = (ev) => { ev.stopPropagation(); startCorrelation(e.request_id); };
+        header.append(reqEl);
+      }
+
+      if (e.duration_ms != null) {
+        const durEl = document.createElement('span');
+        durEl.className = 'badge';
+        durEl.textContent = `${e.duration_ms} мс`;
+        header.append(durEl);
+      }
+
+      // Quick Slice Button on this event
+      if (e.timestamp_utc_ms != null) {
+        const sliceBtn = document.createElement('button');
+        sliceBtn.className = 'sm';
+        sliceBtn.style.marginLeft = 'auto';
+        sliceBtn.textContent = '⏱ Срез';
+        sliceBtn.title = 'Открыть синхронный срез всех источников на эту миллисекунду';
+        sliceBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          openSliceAtTime(e.timestamp_utc_ms);
+        };
+        header.append(sliceBtn);
+      }
+
+      const msgEl = document.createElement('div');
+      msgEl.className = 'event-msg';
+      msgEl.textContent = e.message.length > 500 ? e.message.slice(0, 500) + '…' : e.message;
+
+      card.append(header, msgEl);
+      card.onclick = () => openDetail(e.id);
+      list.append(card);
+    }
+  } catch (err) {
+    $('importStatus').textContent = 'Ошибка загрузки событий: ' + err.message;
+  }
+}
+
+// Time Slice Snapshot (Variant A)
+async function openSliceAtTime(tsMs) {
+  state.sliceTargetTimeMs = tsMs;
+  $('filterStart').value = msToLocalInput(tsMs);
+  switchView('slice');
+}
+
+$('btnSliceFromInput').onclick = () => {
+  const ts = inputToMs($('filterStart').value);
+  if (!ts) {
+    alert('Укажите время в поле "От" для формирования среза.');
+    return;
+  }
+  openSliceAtTime(ts);
+};
+
+async function loadSlice() {
+  if (!state.sliceTargetTimeMs) return;
+
+  $('sliceTimeLabel').textContent = fmtTime(state.sliceTargetTimeMs);
+
+  const effectiveIds = getEffectiveSourceIds();
+  const container = $('sliceList');
+
+  // If NO sources are selected
+  if (effectiveIds.length === 0) {
+    container.innerHTML = `
+      <div class="empty-box">
+        <b>Источники не выбраны</b>
+        <div class="small">Отметьте хотя бы один источник в левой панели, чтобы сформировать срез.</div>
+      </div>
+    `;
+    $('viewModeInfo').textContent = '0 источников выбрано';
+    $('btnSliceStepPrev').disabled = true;
+    $('btnSliceStepNext').disabled = true;
+    return;
+  }
+
+  const p = new URLSearchParams({ timestamp_ms: state.sliceTargetTimeMs });
+  if (effectiveIds.length < state.sources.length) {
+    p.set('source_ids', effectiveIds.join(','));
+  }
+
+  // Active filters applied to time slice
+  const q = $('filterQuery').value.trim();
+  if (q) p.set('q', q);
+
+  // Multi-level filter
+  if (state.selectedLevels.size < 5) {
+    p.set('levels', Array.from(state.selectedLevels).join(',') || 'NONE_SELECTED');
+  }
+
+  // HTTP Codes filter
+  const checkedHttp = [];
+  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
+    checkedHttp.push(...state.selectedHttpClasses);
+    checkedHttp.push(...state.selectedHttpCodes);
+    p.set('http_codes', checkedHttp.join(',') || 'NONE_SELECTED');
+  }
+
+  const rid = $('filterRequestId').value.trim();
+  if (rid) p.set('request_id', rid);
+
+  try {
+    const data = await api('/api/events/slice?' + p.toString());
+    state.slicePrevTimeMs = data.prev_timestamp_ms;
+    state.sliceNextTimeMs = data.next_timestamp_ms;
+
+    $('btnSliceStepPrev').disabled = !data.prev_timestamp_ms;
+    $('btnSliceStepNext').disabled = !data.next_timestamp_ms;
+
+    const hasFilters = Boolean(
+      q ||
+      rid ||
+      state.selectedLevels.size < 5 ||
+      state.selectedHttpClasses.size < 4 ||
+      state.selectedHttpCodes.size > 0 ||
+      state.sourceCategoryFilter !== 'all' ||
+      effectiveIds.length < state.sources.length
+    );
+    if (hasFilters) {
+      $('viewModeInfo').textContent = `Срез с фильтрами: ${data.items.length} из ${effectiveIds.length} источников`;
+    } else {
+      $('viewModeInfo').textContent = `Срез: ${data.total_sources} источников (по 1 записи на файл)`;
+    }
+
+    const container = $('sliceList');
+    container.innerHTML = '';
+
+    if (!data.items || !data.items.length) {
+      container.innerHTML = hasFilters
+        ? '<div class="empty-box"><b>Нет событий, соответствующих выбранным фильтрам</b><div class="small">Попробуйте изменить поисковый запрос, уровень или сбросить фильтры.</div></div>'
+        : '<div class="empty-box"><b>Нет активных событий в выбранных источниках</b></div>';
+      return;
+    }
+
+    for (const item of data.items) {
+      const card = document.createElement('div');
+      card.className = 'slice-card' + (item.is_exact ? ' exact' : '');
+
+      const head = document.createElement('div');
+      head.className = 'slice-header';
+
+      // Source Name
+      const srcName = document.createElement('b');
+      srcName.textContent = item.source_name;
+      srcName.style.fontSize = '13.5px';
+
+      // Delta Badge / Button
+      let deltaEl;
+      if (item.timestamp_utc_ms == null) {
+        deltaEl = document.createElement('span');
+        deltaEl.className = 'delta-badge delta-none';
+        deltaEl.textContent = 'Нет записей';
+      } else if (item.is_exact) {
+        deltaEl = document.createElement('span');
+        deltaEl.className = 'delta-badge delta-exact';
+        deltaEl.textContent = '✓ Точное время (0 мс)';
+        deltaEl.title = 'Событие произошло ровно в текущий момент среза';
+      } else {
+        deltaEl = document.createElement('button');
+        deltaEl.type = 'button';
+        deltaEl.className = 'delta-badge delta-near delta-jump-btn';
+        const sign = item.delta_ms < 0 ? '←' : '→';
+        const absVal = Math.abs(item.delta_ms);
+        const timeStr = absVal >= 1000 ? `${(absVal / 1000).toFixed(2)} с` : `${absVal} мс`;
+        deltaEl.textContent = `${sign} ${item.delta_ms < 0 ? 'раньше на' : 'позже на'} ${timeStr}`;
+        deltaEl.title = `Нажмите, чтобы перенести срез на это время (${fmtTime(item.timestamp_utc_ms)})`;
+        deltaEl.onclick = (ev) => {
+          ev.stopPropagation();
+          openSliceAtTime(item.timestamp_utc_ms);
+        };
+      }
+
+      // Time
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'event-time';
+      timeSpan.textContent = fmtTime(item.timestamp_utc_ms);
+      if (item.timestamp_utc_ms != null && !item.is_exact) {
+        timeSpan.style.cursor = 'pointer';
+        timeSpan.title = `Нажмите, чтобы перейти на время: ${fmtTime(item.timestamp_utc_ms)}`;
+        timeSpan.onclick = (ev) => {
+          ev.stopPropagation();
+          openSliceAtTime(item.timestamp_utc_ms);
+        };
+      }
+
+      // Level Badge
+      const lvlEl = document.createElement('span');
+      const lvlStr = item.level || 'NONE';
+      lvlEl.className = `lvl-badge lvl-${lvlStr}`;
+      lvlEl.textContent = lvlStr;
+
+      const httpBadge = getEventHttpBadge(item);
+
+      head.append(srcName, deltaEl, timeSpan, lvlEl);
+      if (httpBadge) head.append(httpBadge);
+
+      if (item.line_start != null) {
+        const lineEl = document.createElement('span');
+        lineEl.className = 'muted small';
+        lineEl.textContent = `стр. ${item.line_start}${item.line_end > item.line_start ? '-' + item.line_end : ''}`;
+        head.append(lineEl);
+      }
+
+      if (item.request_id) {
+        const reqEl = document.createElement('span');
+        reqEl.className = 'req-pill';
+        reqEl.textContent = item.request_id;
+        reqEl.title = 'Фильтровать по Request ID';
+        reqEl.onclick = (ev) => {
+          ev.stopPropagation();
+          startCorrelation(item.request_id);
+        };
+        head.append(reqEl);
+      }
+
+      // Actions right
+      const actions = document.createElement('div');
+      actions.style.marginLeft = 'auto';
+      actions.className = 'row';
+
+      const eventId = item.event_id || item.id;
+      if (eventId != null) {
+        const btnCtx = document.createElement('button');
+        btnCtx.className = 'sm';
+        btnCtx.textContent = '📄 Контекст ±10';
+        btnCtx.onclick = async (ev) => {
+          ev.stopPropagation();
+          await openDetail(eventId);
+          $('btnLoadContext').click();
+        };
+
+        const btnDet = document.createElement('button');
+        btnDet.className = 'sm';
+        btnDet.textContent = '🔍 Детали';
+        btnDet.onclick = (ev) => {
+          ev.stopPropagation();
+          openDetail(eventId);
+        };
+
+        actions.append(btnCtx, btnDet);
+      }
+      head.append(actions);
+
+      // Message
+      const msg = document.createElement('div');
+      msg.className = 'event-msg';
+      msg.textContent = item.message;
+
+      card.append(head, msg);
+      if (eventId != null) {
+        card.onclick = () => openDetail(eventId);
+      }
+      container.append(card);
+    }
+  } catch (err) {
+    alert('Ошибка загрузки среза: ' + err.message);
+  }
+}
+
+// Slice Stepping Handlers
+$('btnSliceStepPrev1s').onclick = () => {
+  if (state.sliceTargetTimeMs) openSliceAtTime(state.sliceTargetTimeMs - 1000);
+};
+$('btnSliceStepNext1s').onclick = () => {
+  if (state.sliceTargetTimeMs) openSliceAtTime(state.sliceTargetTimeMs + 1000);
+};
+$('btnSliceStepPrev').onclick = () => {
+  if (state.slicePrevTimeMs) openSliceAtTime(state.slicePrevTimeMs);
+};
+$('btnSliceStepNext').onclick = () => {
+  if (state.sliceNextTimeMs) openSliceAtTime(state.sliceNextTimeMs);
+};
+
+// Event Detail Drawer
+async function openDetail(id) {
+  state.activeEventId = id;
+  try {
+    const e = await api('/api/events/' + id);
+    state.activeEvent = e;
+    $('detailId').textContent = e.id;
+    $('detailSource').textContent = `${e.source_name} (строки ${e.line_start}–${e.line_end})`;
+    $('detailTime').textContent = `${fmtTime(e.timestamp_utc_ms)} (raw: ${e.timestamp_raw || 'нет'})`;
+    $('detailMessage').textContent = e.message;
+
+    if (e.request_id) {
+      $('detailReqGroup').style.display = 'block';
+      $('detailReqId').textContent = e.request_id;
+      $('btnFindRelated').onclick = () => {
+        $('detailDrawer').style.display = 'none';
+        startCorrelation(e.request_id);
+      };
+    } else {
+      $('detailReqGroup').style.display = 'none';
+    }
+
+    if (e.fields_json && Object.keys(e.fields_json).length > 0) {
+      $('detailFieldsGroup').style.display = 'block';
+      $('detailFields').textContent = JSON.stringify(e.fields_json, null, 2);
+    } else {
+      $('detailFieldsGroup').style.display = 'none';
+    }
+
+    $('contextViewer').style.display = 'none';
+    $('detailDrawer').style.display = 'flex';
+  } catch (err) {
+    alert('Не удалось загрузить событие: ' + err.message);
+  }
+}
+
+$('btnCloseDrawer').onclick = () => { $('detailDrawer').style.display = 'none'; };
+$('detailDrawer').onclick = (e) => {
+  if (e.target === $('detailDrawer')) $('detailDrawer').style.display = 'none';
+};
+
+// Context Viewer
+$('btnLoadContext').onclick = async () => {
+  if (!state.activeEvent) return;
+  try {
+    const ctx = await api(`/api/events/${state.activeEvent.id}/context?lines=10`);
+    const viewer = $('contextViewer');
+    viewer.innerHTML = '';
+    viewer.style.display = 'block';
+
+    for (const l of ctx.lines) {
+      const lineDiv = document.createElement('div');
+      lineDiv.className = 'code-line' + (l.is_target ? ' target' : '');
+      lineDiv.innerHTML = `<span class="line-num">${l.line_no}</span><span class="line-text">${escapeHtml(l.text)}</span>`;
+      viewer.append(lineDiv);
+    }
+  } catch (err) {
+    alert('Ошибка загрузки контекста файла: ' + err.message);
+  }
+};
+
+// Request ID Correlation
+async function startCorrelation(rid) {
+  $('filterRequestId').value = rid;
+  $('correlationBanner').style.display = 'block';
+  $('corrIdText').textContent = rid;
+
+  try {
+    const corr = await api('/api/correlations/' + encodeURIComponent(rid));
+    const spanSec = (corr.time_span_ms / 1000).toFixed(3);
+    $('corrSummaryText').textContent = `Найдено ${corr.total} событий в ${corr.sources.length} источниках (${corr.sources.join(', ')}). Временной разброс: ${spanSec} сек.`;
+    state.offset = 0;
+    if (state.currentView === 'slice') loadSlice();
+    else switchView('chronology');
+  } catch (err) {
+    $('corrSummaryText').textContent = 'Ошибка корреляции: ' + err.message;
+  }
+}
+
+$('btnCloseCorrelation').onclick = () => {
+  $('filterRequestId').value = '';
+  $('correlationBanner').style.display = 'none';
+  state.offset = 0;
+  if (state.currentView === 'slice') loadSlice();
+  else loadEvents();
+};
+
+// Quick Time Intervals
+function adjustInterval(deltaMs) {
+  let centerMs = null;
+  if (state.activeEvent && state.activeEvent.timestamp_utc_ms) {
+    centerMs = state.activeEvent.timestamp_utc_ms;
+  } else {
+    const startMs = inputToMs($('filterStart').value);
+    const endMs = inputToMs($('filterEnd').value);
+    if (startMs && endMs) centerMs = Math.round((startMs + endMs) / 2);
+    else if (startMs) centerMs = startMs;
+  }
+
+  if (!centerMs) {
+    alert('Выберите событие или укажите время для применения быстрого интервала.');
+    return;
+  }
+
+  $('filterStart').value = msToLocalInput(centerMs - deltaMs);
+  $('filterEnd').value = msToLocalInput(centerMs + deltaMs);
+  state.offset = 0;
+  if (state.currentView === 'slice') openSliceAtTime(centerMs);
+  else loadEvents();
+}
+
+$('btnQuick1s').onclick = () => adjustInterval(1000);
+$('btnQuick10s').onclick = () => adjustInterval(10000);
+$('btnQuick1m').onclick = () => adjustInterval(60000);
+$('btnResetTime').onclick = () => {
+  $('filterStart').value = '';
+  $('filterEnd').value = '';
+  state.offset = 0;
+  loadEvents();
+};
+
+$('btnResetFilters').onclick = () => {
+  $('filterStart').value = '';
+  $('filterEnd').value = '';
+  $('filterQuery').value = '';
+  $('filterRequestId').value = '';
+  $('sourceFilterQuery').value = '';
+  state.selectedLevels = new Set(['ERROR', 'WARN', 'INFO', 'DEBUG', 'NONE']);
+  state.selectedHttpClasses = new Set(['5xx', '4xx', '3xx', '2xx']);
+  state.selectedHttpCodes.clear();
+  updateLevelFilterUI();
+  updateHttpFilterUI();
+  state.selectedSourceIds = new Set(state.sources.map(s => s.id));
+  state.sourceCategoryFilter = 'all';
+  document.querySelectorAll('.source-cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'all'));
+  $('correlationBanner').style.display = 'none';
+  state.offset = 0;
+  renderSources();
+  renderActiveFiltersBar();
+  if (state.currentView === 'slice') loadSlice();
+  else loadEvents();
+};
+
+// Import Handlers
+async function triggerImport() {
+  const folder = $('folderPath').value.trim();
+  if (!folder) return alert('Укажите путь к папке!');
+
+  try {
+    $('btnImport').disabled = true;
+    $('btnCancel').style.display = 'inline-flex';
+    $('progressWrap').style.display = 'block';
+    $('progressBar').style.width = '0%';
+    $('importStatus').textContent = 'Запуск импорта…';
+
+    await api('/api/import/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: folder }),
+    });
+
+    startPolling();
+  } catch (err) {
+    $('importStatus').textContent = 'Ошибка: ' + err.message;
+    $('btnImport').disabled = false;
+    $('btnCancel').style.display = 'none';
+  }
+}
+
+function startPolling() {
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(async () => {
+    try {
+      const st = await api('/api/import/status');
+      $('progressBar').style.width = st.progress_percent + '%';
+      $('importStatus').textContent = st.message || st.status;
+      $('importCounts').textContent = `${st.processed_files}/${st.total_files} файлов · ${st.total_events_imported.toLocaleString()} соб.`;
+
+      if (st.status === 'completed' || st.status === 'failed' || st.status === 'cancelled') {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+        $('btnImport').disabled = false;
+        $('btnCancel').style.display = 'none';
+        setTimeout(() => { $('progressWrap').style.display = 'none'; }, 2000);
+        await loadSources();
+        if (state.currentView === 'slice') loadSlice();
+        else loadEvents();
+      }
+    } catch (err) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+      $('btnImport').disabled = false;
+      $('btnCancel').style.display = 'none';
+    }
+  }, 400);
+}
+
+$('btnImport').onclick = triggerImport;
+$('btnCancel').onclick = async () => {
+  try {
+    await api('/api/import/cancel', { method: 'POST' });
+    $('importStatus').textContent = 'Отмена запрошена…';
+  } catch (err) {
+    alert('Не удалось отменить импорт: ' + err.message);
+  }
+};
+
+// Search & Pagination
+$('btnSearch').onclick = () => {
+  state.offset = 0;
+  if (state.currentView === 'slice') {
+    const startMs = inputToMs($('filterStart').value);
+    if (startMs) state.sliceTargetTimeMs = startMs;
+    loadSlice();
+  } else {
+    loadEvents();
+  }
+  renderActiveFiltersBar();
+};
+$('filterQuery').onkeydown = (e) => {
+  if (e.key === 'Enter') {
+    state.offset = 0;
+    renderActiveFiltersBar();
+    if (state.currentView === 'slice') loadSlice();
+    else loadEvents();
+  }
+};
+$('filterRequestId').onkeydown = (e) => {
+  if (e.key === 'Enter') {
+    state.offset = 0;
+    renderActiveFiltersBar();
+    if (state.currentView === 'slice') loadSlice();
+    else loadEvents();
+  }
+};
+$('btnPrevPage').onclick = () => {
+  if (state.offset > 0) {
+    state.offset = Math.max(0, state.offset - state.pageSize);
+    loadEvents();
+  }
+};
+$('btnNextPage').onclick = () => {
+  if (state.offset + state.pageSize < state.total) {
+    state.offset += state.pageSize;
+    loadEvents();
+  }
+};
+$('btnPrevPageTop').onclick = () => $('btnPrevPage').click();
+$('btnNextPageTop').onclick = () => $('btnNextPage').click();
+
+// Initial boot
+(async () => {
+  try {
+    initFilterDropdowns();
+    updateLevelFilterUI();
+    updateHttpFilterUI();
+    await api('/api/health');
+    $('importStatus').textContent = 'API подключён. Каталог inbox готов к индексации.';
+    await loadSources();
+    await loadEvents();
+  } catch (err) {
+    $('importStatus').textContent = 'Не удалось подключиться к API: ' + err.message;
+  }
+})();
 </script>
 </body>
 </html>
