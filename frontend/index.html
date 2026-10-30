@@ -327,6 +327,10 @@ main {
   border-color: var(--accent);
   background: var(--accent-dim);
 }
+.source-item.active-nav {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .source-item input[type="checkbox"] {
   cursor: pointer;
   accent-color: var(--accent);
@@ -671,6 +675,10 @@ button.xs:hover {
 .slice-card.exact {
   border-color: var(--accent);
   background: var(--panel);
+}
+.slice-card.active-file {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
 }
 
 .slice-header {
@@ -1040,16 +1048,22 @@ button.delta-jump-btn:active {
 
       <!-- Time Slice View (Variant A) -->
       <div id="sliceView" style="display: none; flex-direction: column; flex: 1;">
-        <div class="row slice-toolbar">
-          <div>
+        <div class="row slice-toolbar" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+          <div class="row" style="gap: 6px; align-items: center;">
             <span class="muted small">Срез на момент:</span>
-            <b id="sliceTimeLabel" style="font-family: var(--font-mono); margin-left: 6px;">—</b>
+            <b id="sliceTimeLabel" style="font-family: var(--font-mono);">—</b>
+          </div>
+          <div class="row" style="gap: 6px; align-items: center;">
+            <span class="muted small">Файл для навигации:</span>
+            <select id="sliceStepFileSelect" style="padding: 3px 8px; font-size: 12px; border-radius: 4px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); max-width: 220px; cursor: pointer;"></select>
           </div>
           <div class="grow"></div>
-          <button id="btnSliceStepPrev1s" class="sm" title="Сдвиг на 1 секунду назад">← -1 с</button>
-          <button id="btnSliceStepPrev" class="sm" title="К предыдущему событию в логах">← Пред. событие</button>
-          <button id="btnSliceStepNext" class="sm" title="К следующему событию в логах">След. событие →</button>
-          <button id="btnSliceStepNext1s" class="sm" title="Сдвиг на 1 секунду вперёд">+1 с →</button>
+          <div class="row" style="gap: 4px; flex-wrap: nowrap;">
+            <button id="btnSliceStepPrev1s" class="sm" title="Сдвиг на 1 секунду назад">← -1 с</button>
+            <button id="btnSliceStepPrev" class="sm" title="К предыдущему событию в выбранном файле с учётом фильтров">← Пред. событие</button>
+            <button id="btnSliceStepNext" class="sm" title="К следующему событию в выбранном файле с учётом фильтров">След. событие →</button>
+            <button id="btnSliceStepNext1s" class="sm" title="Сдвиг на 1 секунду вперёд">+1 с →</button>
+          </div>
         </div>
 
         <div class="slice-container" id="sliceList">
@@ -1113,6 +1127,7 @@ const state = {
   theme: localStorage.getItem('logscope-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   sources: [],
   selectedSourceIds: new Set(),
+  selectedFileId: null, // Selected file for event stepping
   sourceCategoryFilter: 'all', // 'all' | 'log' | 'csv' | 'other'
   collapsedSections: new Set(),
   activeEventId: null,
@@ -1243,6 +1258,7 @@ function toggleSource(id) {
 
 function selectOnlySource(id) {
   state.selectedSourceIds = new Set([id]);
+  state.selectedFileId = id;
   state.offset = 0;
   renderSources();
   onFilterChanged();
@@ -1385,7 +1401,8 @@ function renderSources() {
       for (const s of matchingItems) {
         const item = document.createElement('div');
         const isSelected = state.selectedSourceIds.has(s.id);
-        item.className = 'source-item' + (isSelected ? ' selected' : '');
+        const isActiveNav = (state.selectedFileId === s.id);
+        item.className = 'source-item' + (isSelected ? ' selected' : '') + (isActiveNav ? ' active-nav' : '');
 
         const chk = document.createElement('input');
         chk.type = 'checkbox';
@@ -1398,7 +1415,7 @@ function renderSources() {
         const info = document.createElement('div');
         info.className = 'source-info';
         info.innerHTML = `
-          <div class="source-title">${escapeHtml(s.name)}</div>
+          <div class="source-title">${escapeHtml(s.name)}${isActiveNav ? ' <span class="badge" style="font-size:10px; border-color:var(--accent); color:var(--accent-text);">шаг</span>' : ''}</div>
           <div class="muted small">${s.event_count.toLocaleString()} соб. · ${(s.size_bytes / 1024).toFixed(1)} КБ</div>
           <div class="muted small">${s.min_time_ms ? fmtTime(s.min_time_ms) : 'Без времени'}</div>
         `;
@@ -1413,7 +1430,15 @@ function renderSources() {
         };
 
         item.append(chk, info, btnOnly);
-        item.onclick = () => toggleSource(s.id);
+        item.onclick = () => {
+          state.selectedFileId = s.id;
+          if (!state.selectedSourceIds.has(s.id)) {
+            state.selectedSourceIds.add(s.id);
+          }
+          renderSources();
+          if (state.currentView === 'slice') loadSlice();
+          else loadEvents();
+        };
         itemsContainer.append(item);
       }
     }
@@ -1429,15 +1454,14 @@ function renderSources() {
 
 // Helper to extract HTTP status badge from event
 function getEventHttpBadge(e) {
-  let code = null;
-  if (e.fields_json) {
+  let code = e.http_code;
+  if (!code && e.fields_json) {
     code = e.fields_json.responseCode || e.fields_json.status;
   }
   if (!code && e.message) {
-    const m = e.message.match(/HTTP\/[0-9.]+"\s+([0-9]{3})/i) ||
-              e.message.match(/status=([0-9]{3})/i) ||
-              e.message.match(/\[([0-9]{3})\s+[A-Za-z ]+\]/i) ||
-              e.message.match(/\s+([245][0-9]{2})\s+/);
+    const m = e.message.match(/HTTP\/[0-9.]+"?\s+([0-9]{3})/i) ||
+              e.message.match(/\bstatus(?:_code)?\s*[:= ]\s*([0-9]{3})/i) ||
+              e.message.match(/\[([0-9]{3})\s+[A-Za-z ]+\]/i);
     if (m) code = m[1];
   }
   if (!code || isNaN(parseInt(code, 10))) return null;
@@ -1624,6 +1648,28 @@ function renderActiveFiltersBar() {
     bar.append(pill);
   }
 
+  // Time interval
+  const startVal = $('filterStart').value;
+  const endVal = $('filterEnd').value;
+  if (startVal || endVal) {
+    count++;
+    const pill = document.createElement('span');
+    pill.className = 'active-filter-pill';
+    let timeText = '';
+    const sMs = inputToMs(startVal);
+    const eMs = inputToMs(endVal);
+    if (sMs && eMs) timeText = `Время: ${fmtTime(sMs)} – ${fmtTime(eMs)}`;
+    else if (sMs) timeText = `Время от: ${fmtTime(sMs)}`;
+    else if (eMs) timeText = `Время до: ${fmtTime(eMs)}`;
+    pill.innerHTML = `${escapeHtml(timeText)} <button title="Сбросить интервал времени">✕</button>`;
+    pill.querySelector('button').onclick = () => {
+      $('filterStart').value = '';
+      $('filterEnd').value = '';
+      onFilterChanged();
+    };
+    bar.append(pill);
+  }
+
   if (count > 0) {
     const btnClearAll = document.createElement('button');
     btnClearAll.className = 'xs';
@@ -1641,6 +1687,32 @@ function onFilterChanged() {
   renderActiveFiltersBar();
   if (state.currentView === 'slice') loadSlice();
   else loadEvents();
+}
+
+// Build common filter params used by both Chronology and Time Slice
+function buildActiveFilterParams() {
+  const p = new URLSearchParams();
+  const effectiveIds = getEffectiveSourceIds();
+  if (effectiveIds.length < state.sources.length) {
+    p.set('source_ids', effectiveIds.join(','));
+  }
+  const q = $('filterQuery').value.trim();
+  if (q) p.set('q', q);
+
+  if (state.selectedLevels.size < 5) {
+    p.set('levels', Array.from(state.selectedLevels).join(',') || 'NONE_SELECTED');
+  }
+
+  const checkedHttp = [];
+  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
+    checkedHttp.push(...state.selectedHttpClasses, ...state.selectedHttpCodes);
+    p.set('http_codes', checkedHttp.join(',') || 'NONE_SELECTED');
+  }
+
+  const rid = $('filterRequestId').value.trim();
+  if (rid) p.set('request_id', rid);
+
+  return p;
 }
 
 function initFilterDropdowns() {
@@ -1819,6 +1891,12 @@ async function loadSources() {
     }
   }
 
+  // Ensure selectedFileId is initialized
+  if (!state.selectedFileId || !state.sources.some(s => s.id === state.selectedFileId)) {
+    const firstTimed = state.sources.find(s => s.min_time_ms != null);
+    state.selectedFileId = firstTimed ? firstTimed.id : (state.sources[0] ? state.sources[0].id : null);
+  }
+
   renderSources();
 }
 
@@ -1845,35 +1923,14 @@ async function loadEvents() {
     return;
   }
 
-  const p = new URLSearchParams({ limit: state.pageSize, offset: state.offset });
-
-  if (effectiveIds.length < state.sources.length) {
-    p.set('source_ids', effectiveIds.join(','));
-  }
+  const p = buildActiveFilterParams();
+  p.set('limit', state.pageSize);
+  p.set('offset', state.offset);
 
   const startMs = inputToMs($('filterStart').value);
   const endMs = inputToMs($('filterEnd').value);
   if (startMs !== null) p.set('start_ms', startMs);
   if (endMs !== null) p.set('end_ms', endMs);
-
-  const q = $('filterQuery').value.trim();
-  if (q) p.set('q', q);
-
-  // Multi-level filter
-  if (state.selectedLevels.size < 5) {
-    p.set('levels', Array.from(state.selectedLevels).join(',') || 'NONE_SELECTED');
-  }
-
-  // HTTP Codes filter
-  const checkedHttp = [];
-  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
-    checkedHttp.push(...state.selectedHttpClasses);
-    checkedHttp.push(...state.selectedHttpCodes);
-    p.set('http_codes', checkedHttp.join(',') || 'NONE_SELECTED');
-  }
-
-  const rid = $('filterRequestId').value.trim();
-  if (rid) p.set('request_id', rid);
 
   try {
     const data = await api('/api/events?' + p.toString());
@@ -1979,6 +2036,49 @@ $('btnSliceFromInput').onclick = () => {
   openSliceAtTime(ts);
 };
 
+function updateSliceFileSelect(effectiveIds, selectedId) {
+  const sel = $('sliceStepFileSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+
+  const pool = state.sources.filter(s => effectiveIds.includes(s.id));
+  for (const s of pool) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    if (s.id === selectedId) opt.selected = true;
+    sel.append(opt);
+  }
+
+  sel.onchange = (e) => {
+    state.selectedFileId = Number(e.target.value);
+    renderSources();
+    loadSlice();
+  };
+}
+
+async function stepInSource(sourceId, direction) {
+  state.selectedFileId = sourceId;
+  renderSources();
+  const p = buildActiveFilterParams();
+  p.set('timestamp_ms', state.sliceTargetTimeMs);
+  p.set('step_source_id', sourceId);
+
+  try {
+    const data = await api('/api/events/slice?' + p.toString());
+    const targetMs = direction === 'next' ? data.next_timestamp_ms : data.prev_timestamp_ms;
+    const selSrc = state.sources.find(s => s.id === sourceId);
+    const selName = selSrc ? selSrc.name : 'файле';
+    if (targetMs != null) {
+      openSliceAtTime(targetMs);
+    } else {
+      alert(`В ${selName} больше нет ${direction === 'next' ? 'следующих' : 'предыдущих'} событий с учётом активных фильтров.`);
+    }
+  } catch (err) {
+    alert('Ошибка перехода по событию: ' + err.message);
+  }
+}
+
 async function loadSlice() {
   if (!state.sliceTargetTimeMs) return;
 
@@ -2001,42 +2101,40 @@ async function loadSlice() {
     return;
   }
 
-  const p = new URLSearchParams({ timestamp_ms: state.sliceTargetTimeMs });
-  if (effectiveIds.length < state.sources.length) {
-    p.set('source_ids', effectiveIds.join(','));
+  // Ensure selectedFileId is valid
+  if (!state.selectedFileId || !effectiveIds.includes(state.selectedFileId)) {
+    state.selectedFileId = effectiveIds[0];
   }
 
-  // Active filters applied to time slice
-  const q = $('filterQuery').value.trim();
-  if (q) p.set('q', q);
-
-  // Multi-level filter
-  if (state.selectedLevels.size < 5) {
-    p.set('levels', Array.from(state.selectedLevels).join(',') || 'NONE_SELECTED');
+  const p = buildActiveFilterParams();
+  p.set('timestamp_ms', state.sliceTargetTimeMs);
+  if (state.selectedFileId) {
+    p.set('step_source_id', state.selectedFileId);
   }
-
-  // HTTP Codes filter
-  const checkedHttp = [];
-  if (state.selectedHttpClasses.size < 4 || state.selectedHttpCodes.size > 0) {
-    checkedHttp.push(...state.selectedHttpClasses);
-    checkedHttp.push(...state.selectedHttpCodes);
-    p.set('http_codes', checkedHttp.join(',') || 'NONE_SELECTED');
-  }
-
-  const rid = $('filterRequestId').value.trim();
-  if (rid) p.set('request_id', rid);
 
   try {
     const data = await api('/api/events/slice?' + p.toString());
     state.slicePrevTimeMs = data.prev_timestamp_ms;
     state.sliceNextTimeMs = data.next_timestamp_ms;
 
+    // Update navigation file selector dropdown in toolbar
+    updateSliceFileSelect(effectiveIds, state.selectedFileId);
+
+    const selSrc = state.sources.find(s => s.id === state.selectedFileId);
+    const selName = selSrc ? selSrc.name : 'выбранном файле';
+
     $('btnSliceStepPrev').disabled = !data.prev_timestamp_ms;
     $('btnSliceStepNext').disabled = !data.next_timestamp_ms;
+    $('btnSliceStepPrev').title = data.prev_timestamp_ms
+      ? `← К пред. событию в ${selName} (${fmtTime(data.prev_timestamp_ms)}) с учётом фильтров`
+      : `В ${selName} нет предыдущих событий с учётом активных фильтров`;
+    $('btnSliceStepNext').title = data.next_timestamp_ms
+      ? `К след. событию в ${selName} (${fmtTime(data.next_timestamp_ms)}) с учётом фильтров →`
+      : `В ${selName} нет следующих событий с учётом активных фильтров`;
 
     const hasFilters = Boolean(
-      q ||
-      rid ||
+      $('filterQuery').value.trim() ||
+      $('filterRequestId').value.trim() ||
       state.selectedLevels.size < 5 ||
       state.selectedHttpClasses.size < 4 ||
       state.selectedHttpCodes.size > 0 ||
@@ -2044,12 +2142,11 @@ async function loadSlice() {
       effectiveIds.length < state.sources.length
     );
     if (hasFilters) {
-      $('viewModeInfo').textContent = `Срез с фильтрами: ${data.items.length} из ${effectiveIds.length} источников`;
+      $('viewModeInfo').textContent = `Срез с фильтрами: ${data.items.length} из ${effectiveIds.length} источников (навигация: ${selName})`;
     } else {
-      $('viewModeInfo').textContent = `Срез: ${data.total_sources} источников (по 1 записи на файл)`;
+      $('viewModeInfo').textContent = `Срез: ${data.total_sources} источников (навигация: ${selName})`;
     }
 
-    const container = $('sliceList');
     container.innerHTML = '';
 
     if (!data.items || !data.items.length) {
@@ -2060,8 +2157,9 @@ async function loadSlice() {
     }
 
     for (const item of data.items) {
+      const isNavFile = (item.source_id === state.selectedFileId);
       const card = document.createElement('div');
-      card.className = 'slice-card' + (item.is_exact ? ' exact' : '');
+      card.className = 'slice-card' + (item.is_exact ? ' exact' : '') + (isNavFile ? ' active-file' : '');
 
       const head = document.createElement('div');
       head.className = 'slice-header';
@@ -2070,6 +2168,19 @@ async function loadSlice() {
       const srcName = document.createElement('b');
       srcName.textContent = item.source_name;
       srcName.style.fontSize = '13.5px';
+      head.append(srcName);
+
+      // Nav File Badge
+      if (isNavFile) {
+        const navBadge = document.createElement('span');
+        navBadge.className = 'badge';
+        navBadge.style.borderColor = 'var(--accent)';
+        navBadge.style.color = 'var(--accent-text)';
+        navBadge.style.fontSize = '10.5px';
+        navBadge.style.fontWeight = '600';
+        navBadge.textContent = '★ Файл навигации';
+        head.append(navBadge);
+      }
 
       // Delta Badge / Button
       let deltaEl;
@@ -2093,9 +2204,12 @@ async function loadSlice() {
         deltaEl.title = `Нажмите, чтобы перенести срез на это время (${fmtTime(item.timestamp_utc_ms)})`;
         deltaEl.onclick = (ev) => {
           ev.stopPropagation();
+          state.selectedFileId = item.source_id;
+          renderSources();
           openSliceAtTime(item.timestamp_utc_ms);
         };
       }
+      head.append(deltaEl);
 
       // Time
       const timeSpan = document.createElement('span');
@@ -2106,19 +2220,21 @@ async function loadSlice() {
         timeSpan.title = `Нажмите, чтобы перейти на время: ${fmtTime(item.timestamp_utc_ms)}`;
         timeSpan.onclick = (ev) => {
           ev.stopPropagation();
+          state.selectedFileId = item.source_id;
+          renderSources();
           openSliceAtTime(item.timestamp_utc_ms);
         };
       }
+      head.append(timeSpan);
 
       // Level Badge
       const lvlEl = document.createElement('span');
       const lvlStr = item.level || 'NONE';
       lvlEl.className = `lvl-badge lvl-${lvlStr}`;
       lvlEl.textContent = lvlStr;
+      head.append(lvlEl);
 
       const httpBadge = getEventHttpBadge(item);
-
-      head.append(srcName, deltaEl, timeSpan, lvlEl);
       if (httpBadge) head.append(httpBadge);
 
       if (item.line_start != null) {
@@ -2144,6 +2260,27 @@ async function loadSlice() {
       const actions = document.createElement('div');
       actions.style.marginLeft = 'auto';
       actions.className = 'row';
+      actions.style.gap = '5px';
+
+      // Quick step buttons for this file
+      const btnStepPrev = document.createElement('button');
+      btnStepPrev.className = 'xs';
+      btnStepPrev.textContent = '←';
+      btnStepPrev.title = `К пред. событию в ${item.source_name} с учётом фильтров`;
+      btnStepPrev.onclick = (ev) => {
+        ev.stopPropagation();
+        stepInSource(item.source_id, 'prev');
+      };
+
+      const btnStepNext = document.createElement('button');
+      btnStepNext.className = 'xs';
+      btnStepNext.textContent = '→';
+      btnStepNext.title = `К след. событию в ${item.source_name} с учётом фильтров`;
+      btnStepNext.onclick = (ev) => {
+        ev.stopPropagation();
+        stepInSource(item.source_id, 'next');
+      };
+      actions.append(btnStepPrev, btnStepNext);
 
       const eventId = item.event_id || item.id;
       if (eventId != null) {
@@ -2174,9 +2311,15 @@ async function loadSlice() {
       msg.textContent = item.message;
 
       card.append(head, msg);
-      if (eventId != null) {
-        card.onclick = () => openDetail(eventId);
-      }
+
+      card.onclick = () => {
+        if (state.selectedFileId !== item.source_id) {
+          state.selectedFileId = item.source_id;
+          renderSources();
+          loadSlice();
+        }
+      };
+
       container.append(card);
     }
   } catch (err) {
@@ -2192,10 +2335,22 @@ $('btnSliceStepNext1s').onclick = () => {
   if (state.sliceTargetTimeMs) openSliceAtTime(state.sliceTargetTimeMs + 1000);
 };
 $('btnSliceStepPrev').onclick = () => {
-  if (state.slicePrevTimeMs) openSliceAtTime(state.slicePrevTimeMs);
+  if (state.slicePrevTimeMs) {
+    openSliceAtTime(state.slicePrevTimeMs);
+  } else {
+    const selSrc = state.sources.find(s => s.id === state.selectedFileId);
+    const selName = selSrc ? selSrc.name : 'выбранном файле';
+    alert(`В ${selName} больше нет предыдущих событий с учётом активных фильтров.`);
+  }
 };
 $('btnSliceStepNext').onclick = () => {
-  if (state.sliceNextTimeMs) openSliceAtTime(state.sliceNextTimeMs);
+  if (state.sliceNextTimeMs) {
+    openSliceAtTime(state.sliceNextTimeMs);
+  } else {
+    const selSrc = state.sources.find(s => s.id === state.selectedFileId);
+    const selName = selSrc ? selSrc.name : 'выбранном файле';
+    alert(`В ${selName} больше нет следующих событий с учётом активных фильтров.`);
+  }
 };
 
 // Event Detail Drawer
@@ -2316,7 +2471,22 @@ $('btnResetTime').onclick = () => {
   $('filterStart').value = '';
   $('filterEnd').value = '';
   state.offset = 0;
-  loadEvents();
+  renderActiveFiltersBar();
+  if (state.currentView === 'slice') loadSlice();
+  else loadEvents();
+};
+
+$('filterStart').onchange = () => {
+  renderActiveFiltersBar();
+};
+$('filterEnd').onchange = () => {
+  renderActiveFiltersBar();
+};
+$('filterStart').onkeydown = (e) => {
+  if (e.key === 'Enter') $('btnSearch').click();
+};
+$('filterEnd').onkeydown = (e) => {
+  if (e.key === 'Enter') $('btnSearch').click();
 };
 
 $('btnResetFilters').onclick = () => {

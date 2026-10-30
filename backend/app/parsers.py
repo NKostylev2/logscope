@@ -1,9 +1,11 @@
+import codecs
 import csv
 import datetime as dt
 import io
 import json
 import re
 import xml.etree.ElementTree as ET
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterator
 
@@ -24,10 +26,31 @@ REQUEST_RE = re.compile(
     re.I,
 )
 
+# HTTP Status patterns
+HTTP_ACCESS_RE = re.compile(r'HTTP/\d(?:\.\d)?"?\s+([1-5]\d{2})\b', re.I)
+HTTP_STATUS_RE = re.compile(r'\bstatus(?:_code)?\s*[:= ]\s*([1-5]\d{2})\b', re.I)
+HTTP_BRACKET_RE = re.compile(r'\[([1-5]\d{2})\s+[A-Za-z ]+\]')
+
+
+def extract_http_code_from_text(text: str) -> int | None:
+    if not text:
+        return None
+    m = HTTP_ACCESS_RE.search(text) or HTTP_STATUS_RE.search(text) or HTTP_BRACKET_RE.search(text)
+    if m:
+        try:
+            return int(m.group(1))
+        except (ValueError, TypeError):
+            pass
+    return None
+
 # Stack trace / continuation line indicators
 STACK_TRACE_LINE_RE = re.compile(
     r"^(\s+at\s+[\w$./]+|\s+Caused by:|\s+\.\.\.\s+\d+\s+more|\s+org\.|\s+com\.|\s+io\.|\s+net\.|\s+java\.)"
 )
+
+# Upper bound of physical lines kept in memory for a single multi-line event.
+# Longer blocks are emitted as several consecutive events (same timestamp/level/id).
+MAX_EVENT_LINES = 2000
 
 # Valid epoch range: 2000-01-01 to 2100-01-01 in UTC milliseconds
 MIN_EPOCH_MS = 946_684_800_000
@@ -193,23 +216,75 @@ def extract_request_id(message: str) -> str | None:
     return match.group(1) if match else None
 
 
-def open_text_stream(path: Path):
-    """Open a file with encoding fallback (utf-8-sig -> cp1251 -> latin-1)."""
-    encodings = ["utf-8-sig", "cp1251", "latin-1"]
-    for enc in encodings:
+_ENCODING_SCAN_CHUNK = 256 * 1024
+
+
+@lru_cache(maxsize=256)
+def _detect_encoding_cached(path_str: str, size: int, mtime_ns: int) -> str:
+    # size / mtime_ns are part of the cache key only: a changed file is re-scanned.
+    for enc in ("utf-8-sig", "cp1251"):
+        decoder = codecs.getincrementaldecoder(enc)(errors="strict")
         try:
-            with path.open("r", encoding=enc) as f:
-                f.read(4096)
-            return path.open("r", encoding=enc, errors="replace")
-        except (UnicodeDecodeError, OSError):
+            with open(path_str, "rb") as f:
+                while True:
+                    chunk = f.read(_ENCODING_SCAN_CHUNK)
+                    if not chunk:
+                        decoder.decode(b"", final=True)
+                        break
+                    decoder.decode(chunk)
+        except UnicodeDecodeError:
             continue
-    return path.open("r", encoding="utf-8-sig", errors="replace")
+        return enc
+    return "latin-1"
+
+
+def detect_encoding(path: Path) -> str:
+    """Pick the first of utf-8-sig -> cp1251 -> latin-1 that decodes the WHOLE file.
+
+    Sampling only the head is not enough: a cp1251 log that starts with several KB of
+    ASCII (banner, English messages) looks like valid UTF-8 and every Cyrillic byte
+    further down silently turns into U+FFFD. The scan is C-speed and cached per
+    (path, size, mtime).
+    """
+    st = path.stat()
+    return _detect_encoding_cached(str(path), st.st_size, st.st_mtime_ns)
+
+
+def open_text_stream(path: Path):
+    """Open a file as text using the encoding chosen by detect_encoding()."""
+    return path.open("r", encoding=detect_encoding(path), errors="replace")
+
+
+def _text_event(ev: dict) -> dict:
+    lines = ev.get("message_lines", [])
+    msg = "\n".join(lines)
+    http_code = extract_http_code_from_text(lines[0] if lines else "")
+    if http_code is None and len(lines) > 1:
+        http_code = extract_http_code_from_text(lines[1])
+
+    return {
+        "timestamp_utc_ms": ev["timestamp_utc_ms"],
+        "timestamp_ms": ev["timestamp_utc_ms"],
+        "timestamp_raw": ev["timestamp_raw"],
+        "level": ev["level"],
+        "message": msg,
+        "line_start": ev["line_start"],
+        "line_end": ev["line_end"],
+        "request_id": ev["request_id"],
+        "duration_ms": None,
+        "event_type": "log",
+        "fields_json": "{}",
+        "http_code": http_code,
+    }
 
 
 def parse_text_file(path: Path) -> Iterator[dict]:
     """Streamingly parse plain text / log files with multi-line message merging.
     Continuation lines (Java stack traces, indented lines, lines without timestamps)
     are merged into the preceding event while tracking exact line_start and line_end.
+    A single event never holds more than MAX_EVENT_LINES lines: longer blocks (or a
+    file with no parsable timestamps at all) are split into consecutive events, so
+    memory stays bounded regardless of file size.
     """
     stream = open_text_stream(path)
     current_event = None
@@ -219,80 +294,41 @@ def parse_text_file(path: Path) -> Iterator[dict]:
         for raw_line in stream:
             line_no += 1
             line = raw_line.rstrip("\r\n")
+            blank = not line.strip()
 
-            if not line.strip():
-                if current_event:
-                    current_event["message_lines"].append(line)
-                    current_event["line_end"] = line_no
+            if blank and current_event is None:
                 continue
 
-            ts_ms, raw_ts = extract_timestamp(line)
-            is_continuation = False
+            ts_ms, raw_ts = (None, None) if blank else extract_timestamp(line)
+            is_continuation = current_event is not None and (
+                blank or ts_ms is None or bool(STACK_TRACE_LINE_RE.match(line))
+            )
 
-            if current_event is not None:
-                if ts_ms is None:
-                    # Line has no timestamp - likely continuation of current event
-                    is_continuation = True
-                elif STACK_TRACE_LINE_RE.match(line):
-                    # Explicit stack trace marker
-                    is_continuation = True
-                elif len(current_event["message_lines"]) > 100:
-                    # Guard against runaway memory if file has huge blocks
-                    is_continuation = False
-
-            if is_continuation and current_event is not None:
+            if is_continuation:
+                if len(current_event["message_lines"]) >= MAX_EVENT_LINES:
+                    # Emit what we have and continue in a new segment that inherits
+                    # timestamp / level / request_id from the event being split.
+                    yield _text_event(current_event)
+                    current_event = {**current_event, "message_lines": [], "line_start": line_no}
                 current_event["message_lines"].append(line)
                 current_event["line_end"] = line_no
-                # Also check if request_id appears in continuation lines
                 if not current_event["request_id"]:
                     current_event["request_id"] = extract_request_id(line)
             else:
-                # Flush existing event
                 if current_event is not None:
-                    msg = "\n".join(current_event["message_lines"])
-                    yield {
-                        "timestamp_utc_ms": current_event["timestamp_utc_ms"],
-                        "timestamp_ms": current_event["timestamp_utc_ms"],
-                        "timestamp_raw": current_event["timestamp_raw"],
-                        "level": current_event["level"],
-                        "message": msg,
-                        "line_start": current_event["line_start"],
-                        "line_end": current_event["line_end"],
-                        "request_id": current_event["request_id"],
-                        "duration_ms": None,
-                        "event_type": "log",
-                        "fields_json": "{}",
-                    }
-
-                # Start new event
-                lvl = extract_level(line)
-                req_id = extract_request_id(line)
+                    yield _text_event(current_event)
                 current_event = {
                     "timestamp_utc_ms": ts_ms,
                     "timestamp_raw": raw_ts,
-                    "level": lvl,
+                    "level": extract_level(line),
                     "message_lines": [line],
                     "line_start": line_no,
                     "line_end": line_no,
-                    "request_id": req_id,
+                    "request_id": extract_request_id(line),
                 }
 
-        # Flush final event
         if current_event is not None:
-            msg = "\n".join(current_event["message_lines"])
-            yield {
-                "timestamp_utc_ms": current_event["timestamp_utc_ms"],
-                "timestamp_ms": current_event["timestamp_utc_ms"],
-                "timestamp_raw": current_event["timestamp_raw"],
-                "level": current_event["level"],
-                "message": msg,
-                "line_start": current_event["line_start"],
-                "line_end": current_event["line_end"],
-                "request_id": current_event["request_id"],
-                "duration_ms": None,
-                "event_type": "log",
-                "fields_json": "{}",
-            }
+            yield _text_event(current_event)
     finally:
         stream.close()
 
@@ -330,9 +366,16 @@ def parse_csv_file(path: Path) -> Iterator[dict]:
                     time_key = orig
                     break
 
-        line_no = 1
+        # reader.line_num counts physical lines, so quoted fields that span several
+        # lines (failureMessage, stack traces) no longer shift every later row.
+        prev_line = reader.line_num
         for row in reader:
-            line_no += 1
+            line_start = prev_line + 1
+            line_end = prev_line = reader.line_num
+            # A truncated row (live JTL, killed JMeter) yields None for the missing
+            # columns, and extra values land under a None key. Drop both so the code
+            # below can rely on row.get(name, "") returning a string.
+            row = {k: v for k, v in row.items() if k is not None and v is not None}
             raw_ts = (row.get(time_key) or "").strip() if time_key else ""
             ts_ms = parse_timestamp(raw_ts)
 
@@ -399,18 +442,25 @@ def parse_csv_file(path: Path) -> Iterator[dict]:
                 fields = {k: v for k, v in fields.items() if v not in ("", None)}
 
                 rid = extract_request_id(message) or extract_request_id(url)
+                http_code = None
+                if rc and str(rc).strip().isdigit() and len(str(rc).strip()) == 3:
+                    http_code = int(str(rc).strip())
+                if http_code is None:
+                    http_code = extract_http_code_from_text(message)
+
                 yield {
                     "timestamp_utc_ms": ts_ms,
                     "timestamp_ms": ts_ms,
                     "timestamp_raw": raw_ts or None,
                     "level": level,
                     "message": message,
-                    "line_start": line_no,
-                    "line_end": line_no,
+                    "line_start": line_start,
+                    "line_end": line_end,
                     "request_id": rid,
                     "duration_ms": duration_ms,
                     "event_type": "jmeter_sample",
                     "fields_json": json.dumps(fields, ensure_ascii=False),
+                    "http_code": http_code,
                 }
             else:
                 # Generic / Monitoring CSV
@@ -418,6 +468,7 @@ def parse_csv_file(path: Path) -> Iterator[dict]:
                 message = " | ".join(msg_parts)
                 level = extract_level(message)
                 rid = extract_request_id(message)
+                http_code = extract_http_code_from_text(message)
 
                 # Duration if present
                 duration_ms = None
@@ -435,12 +486,13 @@ def parse_csv_file(path: Path) -> Iterator[dict]:
                     "timestamp_raw": raw_ts or None,
                     "level": level,
                     "message": message,
-                    "line_start": line_no,
-                    "line_end": line_no,
+                    "line_start": line_start,
+                    "line_end": line_end,
                     "request_id": rid,
                     "duration_ms": duration_ms,
                     "event_type": "metric" if any("cpu" in k or "mem" in k or "usage" in k for k in names) else "csv_row",
                     "fields_json": json.dumps(fields, ensure_ascii=False),
+                    "http_code": http_code,
                 }
     finally:
         stream.close()
@@ -455,9 +507,21 @@ def parse_xml_jtl(path: Path) -> Iterator[dict]:
     stream = open_text_stream(path)
     sample_index = 0
     try:
-        # iterparse takes a byte stream or file object
-        context = ET.iterparse(stream, events=("end",))
+        # iterparse takes a byte stream or file object.
+        # elem.clear() only empties the element itself - the (now empty) element object
+        # stays referenced by the root, so memory still grew linearly with the number
+        # of samples. We track the root through "start" events and drop its finished
+        # children as soon as each top-level sample is closed.
+        context = ET.iterparse(stream, events=("start", "end"))
+        root = None
+        depth = 0
         for event, elem in context:
+            if event == "start":
+                if root is None:
+                    root = elem
+                depth += 1
+                continue
+            depth -= 1
             tag = elem.tag
             if tag in ("httpSample", "sample"):
                 sample_index += 1
@@ -534,6 +598,11 @@ def parse_xml_jtl(path: Path) -> Iterator[dict]:
                 fields = {k: v for k, v in fields.items() if v not in ("", None)}
 
                 rid = extract_request_id(message) or extract_request_id(url)
+                http_code = None
+                if rc and str(rc).strip().isdigit() and len(str(rc).strip()) == 3:
+                    http_code = int(str(rc).strip())
+                if http_code is None:
+                    http_code = extract_http_code_from_text(message)
 
                 yield {
                     "timestamp_utc_ms": ts_ms,
@@ -547,10 +616,14 @@ def parse_xml_jtl(path: Path) -> Iterator[dict]:
                     "duration_ms": duration_ms,
                     "event_type": "jmeter_sample",
                     "fields_json": json.dumps(fields, ensure_ascii=False),
+                    "http_code": http_code,
                 }
 
-                # Clear element and previous siblings to free memory
                 elem.clear()
+
+            if depth == 1 and root is not None:
+                # A direct child of the root element has just been closed.
+                root.clear()
     except (ET.ParseError, OSError):
         # Gracefully exit on corrupt XML or truncation
         return
@@ -558,34 +631,27 @@ def parse_xml_jtl(path: Path) -> Iterator[dict]:
         stream.close()
 
 
-def iter_file_events(path: Path) -> Iterator[dict]:
-    """Identify file type and dispatch to the appropriate streaming parser."""
+def is_xml_source(path: Path) -> bool:
+    """True for files parsed as JMeter XML JTL (.xml, or .jtl whose head looks like XML)."""
     suffix = path.suffix.lower()
-
     if suffix == ".xml":
-        yield from parse_xml_jtl(path)
-        return
-
-    if suffix == ".csv":
-        yield from parse_csv_file(path)
-        return
-
+        return True
     if suffix == ".jtl":
-        # Check first line to distinguish XML vs CSV JTL
-        is_xml = False
         try:
             with open_text_stream(path) as f:
                 head = f.read(512).strip()
-                if head.startswith("<?xml") or "<testResults" in head:
-                    is_xml = True
         except OSError:
-            pass
+            return False
+        return head.startswith("<?xml") or "<testResults" in head
+    return False
 
-        if is_xml:
-            yield from parse_xml_jtl(path)
-        else:
-            yield from parse_csv_file(path)
-        return
 
-    # Plain text / log files
-    yield from parse_text_file(path)
+def iter_file_events(path: Path) -> Iterator[dict]:
+    """Identify file type and dispatch to the appropriate streaming parser."""
+    if is_xml_source(path):
+        yield from parse_xml_jtl(path)
+    elif path.suffix.lower() in (".csv", ".jtl"):
+        yield from parse_csv_file(path)
+    else:
+        # Plain text / log files
+        yield from parse_text_file(path)

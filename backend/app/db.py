@@ -2,6 +2,15 @@ import sqlite3
 from contextlib import contextmanager
 from .config import DATA_DIR, DB_PATH
 
+
+def _ucontains(haystack, needle_folded):
+    """Case-insensitive substring test that understands non-ASCII text.
+
+    SQLite's built-in LIKE folds case for ASCII only, so 'ошибка' never matches
+    'Ошибка'. `needle_folded` must already be passed through str.casefold().
+    """
+    return 1 if haystack is not None and needle_folded in haystack.casefold() else 0
+
 TABLES_SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -36,19 +45,21 @@ CREATE TABLE IF NOT EXISTS events (
     request_id TEXT,
     duration_ms INTEGER,
     event_type TEXT NOT NULL DEFAULT 'log',
-    fields_json TEXT NOT NULL DEFAULT '{}'
+    fields_json TEXT NOT NULL DEFAULT '{}',
+    http_code INTEGER
 );
 """
 
 INDEXES_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(timestamp_utc_ms, id);
 CREATE INDEX IF NOT EXISTS idx_events_source_time ON events(source_id, timestamp_utc_ms, id);
-CREATE INDEX IF NOT EXISTS idx_events_source_utc_time ON events(source_id, timestamp_utc_ms, id);
 CREATE INDEX IF NOT EXISTS idx_events_request_id ON events(request_id);
 CREATE INDEX IF NOT EXISTS idx_events_level_time ON events(level, timestamp_utc_ms);
 CREATE INDEX IF NOT EXISTS idx_events_legacy_time ON events(timestamp_ms, id);
 CREATE INDEX IF NOT EXISTS idx_events_resp_code ON events(json_extract(fields_json, '$.responseCode'));
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(json_extract(fields_json, '$.status'));
+CREATE INDEX IF NOT EXISTS idx_events_http_code ON events(http_code, timestamp_utc_ms);
+CREATE INDEX IF NOT EXISTS idx_events_source_http ON events(source_id, http_code, timestamp_utc_ms);
 """
 
 
@@ -57,11 +68,12 @@ def connect():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.create_function("ucontains", 2, _ucontains, deterministic=True)
     return conn
 
 
 def init_db():
-    with connect() as conn:
+    with transaction() as conn:
         # 1. Create base tables
         conn.executescript(TABLES_SCHEMA)
 
@@ -100,8 +112,29 @@ def init_db():
             conn.execute("ALTER TABLE events ADD COLUMN duration_ms INTEGER")
         if "event_type" not in evt_cols:
             conn.execute("ALTER TABLE events ADD COLUMN event_type TEXT NOT NULL DEFAULT 'log'")
+        if "http_code" not in evt_cols:
+            conn.execute("ALTER TABLE events ADD COLUMN http_code INTEGER")
+            conn.execute("""
+                UPDATE events
+                SET http_code = CAST(json_extract(fields_json, '$.responseCode') AS INTEGER)
+                WHERE json_extract(fields_json, '$.responseCode') IS NOT NULL AND http_code IS NULL
+            """)
+            conn.execute("""
+                UPDATE events
+                SET http_code = CAST(SUBSTR(message, INSTR(message, 'HTTP/1.') + 10, 3) AS INTEGER)
+                WHERE message LIKE '%HTTP/1._" %' AND http_code IS NULL
+            """)
+            conn.execute("""
+                UPDATE events
+                SET http_code = CAST(SUBSTR(message, INSTR(message, 'status ') + 7, 3) AS INTEGER)
+                WHERE message LIKE '%status %' AND http_code IS NULL
+                  AND SUBSTR(message, INSTR(message, 'status ') + 7, 3) GLOB '[1-5][0-9][0-9]'
+            """)
 
-        # 3. Create indexes now that all columns are guaranteed to exist
+        # 3. Create indexes now that all columns are guaranteed to exist.
+        #    idx_events_source_utc_time was an exact duplicate of idx_events_source_time
+        #    (it only slowed down imports and bloated the database) - drop it if present.
+        conn.execute("DROP INDEX IF EXISTS idx_events_source_utc_time")
         conn.executescript(INDEXES_SCHEMA)
         conn.commit()
 

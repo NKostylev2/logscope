@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
-from app.db import init_db
+from app.db import init_db, transaction
 from app.importer import import_folder
 from app.main import app
 
@@ -348,4 +348,199 @@ def test_events_multi_level_and_http_codes(setup_test_env):
         slice_data = slice_res.json()
         assert len(slice_data["items"]) >= 1
         assert any("500" in (item.get("fields_json") or {}).get("responseCode", "") or "500" in item["message"] for item in slice_data["items"])
+
+
+
+# ---------------------------------------------------------------- audit regressions
+
+def test_search_is_case_insensitive_for_cyrillic(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    (inbox / "ru.log").write_text(
+        "2026-10-15 10:00:00.000 ERROR Ошибка подключения к базе\n"
+        "2026-10-15 10:00:01.000 INFO Всё хорошо\n",
+        encoding="utf-8",
+    )
+    import_folder(str(inbox))
+
+    with TestClient(app) as client:
+        for q in ("Ошибка", "ошибка", "ОШИБКА", "ошибка подключения"):
+            assert client.get("/api/events", params={"q": q}).json()["total"] == 1, q
+        assert client.get("/api/events", params={"q": "нет такого"}).json()["total"] == 0
+        # the ASCII path still escapes LIKE wildcards
+        assert client.get("/api/events", params={"q": "%"}).json()["total"] == 0
+        assert client.get("/api/events", params={"q": "error"}).json()["total"] == 1
+
+
+def test_http_class_filter_ignores_bracketed_timestamps(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    (inbox / "web.log").write_text(
+        "[2026-10-15 10:00:00] INFO user logged in\n"
+        "2026-10-15 10:00:01.000 INFO GET /health HTTP/1.1 200 OK\n"
+        "2026-10-15 10:00:02.000 WARN GET /missing HTTP/1.1 404 Not Found\n",
+        encoding="utf-8",
+    )
+    (inbox / "load.csv").write_text(
+        "timeStamp,elapsed,label,responseCode,responseMessage,success\n"
+        "1792059800000,10,GET /a,200,OK,true\n"
+        "1792059800100,11,GET /b,503,Service Unavailable,false\n",
+        encoding="utf-8",
+    )
+    import_folder(str(inbox))
+
+    with TestClient(app) as client:
+        two_xx = client.get("/api/events", params={"http_codes": "2xx"}).json()
+        messages = [i["message"] for i in two_xx["items"]]
+        assert two_xx["total"] == 2, messages
+        assert not any("logged in" in m for m in messages)
+
+        assert client.get("/api/events", params={"http_codes": "5xx"}).json()["total"] == 1
+        assert client.get("/api/events", params={"http_codes": "404"}).json()["total"] == 1
+
+
+def test_level_filter_uses_the_level_index():
+    from app.db import connect
+    from app.main import build_level_clause
+
+    sql, params = build_level_clause("error")
+    with connect() as conn:
+        plan = " ".join(
+            row[3] for row in conn.execute(f"EXPLAIN QUERY PLAN SELECT COUNT(*) FROM events e WHERE {sql}", params)
+        )
+    assert "SEARCH" in plan and "idx_events_level_time" in plan, plan
+
+
+def test_timeline_never_returns_more_buckets_than_requested(setup_test_env):
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO sources(id, path, name, size_bytes, mtime_ns, event_count) VALUES (1, '/x', 'x', 1, 1, 1000)"
+        )
+        conn.executemany(
+            "INSERT INTO events(source_id, timestamp_utc_ms, timestamp_ms, message, line_start, line_end) "
+            "VALUES (1, ?, ?, 'm', 1, 1)",
+            [(i, i) for i in range(1000)],
+        )
+    with TestClient(app) as client:
+        data = client.get("/api/timeline", params={"start_ms": 0, "end_ms": 1000, "buckets": 60}).json()
+    assert len(data["buckets"]) <= 60
+    assert sum(sum(b["sources"].values()) for b in data["buckets"]) == 1000
+
+
+def test_context_is_rejected_for_xml_jtl(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    (inbox / "run.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><testResults version="1.2">'
+        '<httpSample t="5" ts="1792059800000" s="true" lb="GET /" rc="200"/></testResults>',
+        encoding="utf-8",
+    )
+    import_folder(str(inbox))
+    with TestClient(app) as client:
+        event_id = client.get("/api/events").json()["items"][0]["id"]
+        res = client.get(f"/api/events/{event_id}/context")
+    assert res.status_code == 422
+
+
+def test_total_is_correct_for_partial_full_and_out_of_range_pages(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    (inbox / "p.log").write_text(
+        "".join(f"2026-10-15 10:00:{i:02d}.000 INFO line {i}\n" for i in range(25)), encoding="utf-8"
+    )
+    import_folder(str(inbox))
+
+    with TestClient(app) as client:
+        def total(**params):
+            return client.get("/api/events", params=params).json()["total"]
+
+        assert total(limit=100) == 25               # partial first page (count skipped)
+        assert total(limit=10) == 25                # full page -> COUNT query
+        assert total(limit=10, offset=20) == 25     # partial later page: offset + rows
+        assert total(limit=10, offset=100) == 25    # out of range -> COUNT query
+        assert total(limit=10, q="line 7") == 1
+        assert total(limit=10, q="no such text", offset=0) == 0
+
+
+def test_http_filter_no_false_positives(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    # 1. proxy.log with 201 status and 467 bytes (should NOT match 4xx)
+    (inbox / "proxy.log").write_text(
+        '2026-10-15 10:00:00.000 INFO 192.168.1.1 - [15/Oct/2026:10:00:00 +0000] "POST /api/item HTTP/1.0" 201 467 "https://example.com" "Mozilla/5.0"\n',
+        encoding="utf-8"
+    )
+    # 2. timescale.log with postgres PID [40] (should NOT match 4xx)
+    (inbox / "timescale0.log").write_text(
+        '2026-10-15 10:00:00.000 NONE 2026-10-15 10:00:00.000 UTC [40] DETAIL: Last completed transaction was at log time\n',
+        encoding="utf-8"
+    )
+    # 3. real 404 error
+    (inbox / "error.log").write_text(
+        '2026-10-15 10:00:01.000 WARN GET /missing HTTP/1.1 404 Not Found\n',
+        encoding="utf-8"
+    )
+    import_folder(str(inbox))
+
+    with TestClient(app) as client:
+        # 4xx filter must ONLY match error.log
+        res_4xx = client.get("/api/events?http_codes=4xx")
+        assert res_4xx.status_code == 200
+        items_4xx = res_4xx.json()["items"]
+        assert len(items_4xx) == 1
+        assert items_4xx[0]["source_name"] == "error.log"
+
+        # 5xx filter must match 0 events
+        res_5xx = client.get("/api/events?http_codes=5xx")
+        assert res_5xx.status_code == 200
+        assert res_5xx.json()["total"] == 0
+
+        # NONE_SELECTED must match 0 events
+        res_none = client.get("/api/events?http_codes=NONE_SELECTED")
+        assert res_none.status_code == 200
+        assert res_none.json()["total"] == 0
+
+
+def test_slice_step_source_id_with_filters(setup_test_env):
+    inbox = setup_test_env["inbox"]
+    # Source A has events at t=1000 (200), t=3000 (500), t=5000 (200), t=7000 (500)
+    (inbox / "srvA.log").write_text(
+        '2026-10-15 10:00:01.000 INFO GET /a1 HTTP/1.1 200 OK\n'
+        '2026-10-15 10:00:03.000 ERROR GET /a2 HTTP/1.1 500 Error\n'
+        '2026-10-15 10:00:05.000 INFO GET /a3 HTTP/1.1 200 OK\n'
+        '2026-10-15 10:00:07.000 ERROR GET /a4 HTTP/1.1 500 Error\n',
+        encoding="utf-8"
+    )
+    # Source B has events at t=2000 (200), t=4000 (500), t=6000 (200)
+    (inbox / "srvB.log").write_text(
+        '2026-10-15 10:00:02.000 INFO GET /b1 HTTP/1.1 200 OK\n'
+        '2026-10-15 10:00:04.000 ERROR GET /b2 HTTP/1.1 500 Error\n'
+        '2026-10-15 10:00:06.000 INFO GET /b3 HTTP/1.1 200 OK\n',
+        encoding="utf-8"
+    )
+    import_folder(str(inbox))
+
+    with TestClient(app) as client:
+        sources = client.get("/api/sources").json()
+        src_a = next(s for s in sources if s["name"] == "srvA.log")
+        src_b = next(s for s in sources if s["name"] == "srvB.log")
+
+        # Start at t=1000 (t=1000 in srvA)
+        t0 = src_a["min_time_ms"]
+        # Step forward in srvA with filter http_codes=500
+        # The next 500 in srvA is at t0 + 2000 (10:00:03.000). srvB has an event at t0 + 1000 (200) and t0 + 3000 (500),
+        # but stepping in srvA must strictly return srvA's next 500!
+        res1 = client.get(f"/api/events/slice?timestamp_ms={t0}&step_source_id={src_a['id']}&http_codes=500")
+        assert res1.status_code == 200
+        d1 = res1.json()
+        assert d1["next_timestamp_ms"] == t0 + 2000  # 10:00:03.000 in srvA
+
+        # Now at t=t0+2000, step forward in srvA with http_codes=500
+        res2 = client.get(f"/api/events/slice?timestamp_ms={t0 + 2000}&step_source_id={src_a['id']}&http_codes=500")
+        assert res2.status_code == 200
+        d2 = res2.json()
+        assert d2["next_timestamp_ms"] == t0 + 6000  # 10:00:07.000 in srvA
+        assert d2["prev_timestamp_ms"] is None  # No earlier 500 in srvA than 10:00:03
+
+        # At t=t0+6000 (10:00:07), no further 500 events in srvA
+        res3 = client.get(f"/api/events/slice?timestamp_ms={t0 + 6000}&step_source_id={src_a['id']}&http_codes=500")
+        assert res3.status_code == 200
+        d3 = res3.json()
+        assert d3["next_timestamp_ms"] is None
+        assert d3["prev_timestamp_ms"] == t0 + 2000  # can step back to 10:00:03.000 in srvA!
 

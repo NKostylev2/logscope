@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import os
 import threading
@@ -5,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional
 from .config import ALLOWED_ROOT, MAX_FILE_BYTES, SUPPORTED_EXTENSIONS, PROJECT_DIR
-from .db import connect, transaction
+from .db import transaction
 from .parsers import iter_file_events
 
 
@@ -77,6 +78,11 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
     if cancel_event and cancel_event.is_set():
         return {"path": str(path), "status": "cancelled", "reason": "user_cancelled"}
 
+    # The folder was validated, but a file inside it may be a symlink that points
+    # outside ALLOWED_ROOT. Never index (and later serve) content from there.
+    if not is_within_root(path, ALLOWED_ROOT):
+        return {"path": str(path), "status": "skipped", "reason": "outside_allowed_root"}
+
     try:
         stat = path.stat()
     except OSError as exc:
@@ -88,15 +94,18 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
     quick_hash = compute_quick_fingerprint(path)
     path_str = str(path)
 
-    with connect() as conn:
+    with transaction() as conn:
         existing = conn.execute(
-            "SELECT id, size_bytes, mtime_ns, sha256 FROM sources WHERE path=?",
+            "SELECT id, size_bytes, mtime_ns, sha256, status FROM sources WHERE path=?",
             (path_str,)
         ).fetchone()
 
-        # Check if file is completely unchanged
+        # Check if file is completely unchanged. A source whose previous import failed
+        # (status 'error' / 'indexing') carries the real size+mtime, so without the
+        # status check it would be reported as "unchanged" and never retried.
         if (
             existing
+            and existing["status"] == "ok"
             and existing["size_bytes"] == stat.st_size
             and existing["mtime_ns"] == stat.st_mtime_ns
             and (existing["sha256"] == quick_hash if existing["sha256"] else True)
@@ -158,6 +167,7 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
                     event.get("duration_ms"),
                     event.get("event_type", "log"),
                     event.get("fields_json", "{}"),
+                    event.get("http_code"),
                 ))
                 count += 1
 
@@ -165,8 +175,8 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
                     conn.executemany(
                         """INSERT INTO events
                            (source_id, timestamp_utc_ms, timestamp_ms, timestamp_raw, level, message,
-                            line_start, line_end, request_id, duration_ms, event_type, fields_json)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            line_start, line_end, request_id, duration_ms, event_type, fields_json, http_code)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         batch
                     )
                     batch.clear()
@@ -175,8 +185,8 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
                 conn.executemany(
                     """INSERT INTO events
                        (source_id, timestamp_utc_ms, timestamp_ms, timestamp_raw, level, message,
-                        line_start, line_end, request_id, duration_ms, event_type, fields_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        line_start, line_end, request_id, duration_ms, event_type, fields_json, http_code)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     batch
                 )
 
@@ -212,12 +222,18 @@ def import_single_file(path: Path, cancel_event: Optional[threading.Event] = Non
 
 def clean_deleted_sources(folder: Path) -> int:
     """Find and remove sources registered in DB that no longer exist on disk."""
-    folder_prefix = str(folder.resolve())
+    folder_resolved = folder.resolve()
     deleted_count = 0
     with transaction() as conn:
-        rows = conn.execute("SELECT id, path FROM sources WHERE path LIKE ?", (folder_prefix + "%",)).fetchall()
+        # Containment is checked per path component. The former `path LIKE '<folder>%'`
+        # also matched sibling folders ('inbox_old' for 'inbox') and treated '_' / '%'
+        # in the folder name as wildcards.
+        rows = conn.execute("SELECT id, path FROM sources").fetchall()
         for row in rows:
-            if not Path(row["path"]).exists():
+            source_path = Path(row["path"])
+            if not source_path.is_relative_to(folder_resolved):
+                continue
+            if not source_path.exists():
                 conn.execute("DELETE FROM events WHERE source_id=?", (row["id"],))
                 conn.execute("DELETE FROM sources WHERE id=?", (row["id"],))
                 deleted_count += 1
@@ -251,6 +267,9 @@ def import_folder(folder_str: str, cancel_event: Optional[threading.Event] = Non
     }
 
 
+MAX_RECORDED_ERRORS = 200
+
+
 class ImportManager:
     """Thread-safe background import manager with progress tracking and cancellation."""
 
@@ -275,7 +294,9 @@ class ImportManager:
 
     def get_status(self) -> dict:
         with self._lock:
-            return dict(self.state)
+            # Deep copy: the nested `stats` / `errors` objects are mutated by the worker
+            # thread, and the caller serializes the result after the lock is released.
+            return copy.deepcopy(self.state)
 
     def cancel(self) -> dict:
         with self._lock:
@@ -363,8 +384,17 @@ class ImportManager:
                     if status == "imported":
                         total_events += res.get("event_count", 0)
                         self.state["total_events_imported"] = total_events
-                    elif status == "error":
+                    elif status == "error" and len(self.state["errors"]) < MAX_RECORDED_ERRORS:
+                        # The full count stays in stats["error"]; the list is capped.
                         self.state["errors"].append({"file": path.name, "error": res.get("reason", "unknown")})
+
+            if self._cancel_event.is_set():
+                # Cancel arrived while the last file was being imported.
+                with self._lock:
+                    self.state["status"] = "cancelled"
+                    self.state["completed_at"] = time.time()
+                    self.state["message"] = "Импорт отменён пользователем"
+                return
 
             with self._lock:
                 self.state["status"] = "completed"

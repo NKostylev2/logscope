@@ -1,4 +1,5 @@
 import json
+import tracemalloc
 import pytest
 from pathlib import Path
 from app.parsers import (
@@ -283,3 +284,114 @@ def test_encoding_fallback_cp1251(tmp_path: Path):
     events = list(parse_text_file(file_path))
     assert len(events) == 1
     assert "Тестовое сообщение на русском языке" in events[0]["message"]
+
+
+# ---------------------------------------------------------------- audit regressions
+
+def test_csv_truncated_last_row_does_not_crash(tmp_path: Path):
+    """A live / killed JMeter run leaves a cut-off last row; it used to abort the whole file."""
+    f = tmp_path / "live.csv"
+    f.write_text(
+        "timeStamp,elapsed,label,responseCode,responseMessage,threadName,success\n"
+        "1792059800000,120,GET /a,200,OK,TG-1,true\n"
+        "1792059800100,130,GET /b,500,Err,TG-1,false\n"
+        "1792059800200,14",
+        encoding="utf-8",
+    )
+    events = list(parse_csv_file(f))
+    assert len(events) == 3
+    assert [e["level"] for e in events[:2]] == ["INFO", "ERROR"]
+    assert events[2]["timestamp_utc_ms"] == 1792059800200
+
+
+def test_csv_line_numbers_follow_physical_lines(tmp_path: Path):
+    f = tmp_path / "multi.csv"
+    f.write_text(
+        "timeStamp,elapsed,label,responseCode,responseMessage,success,failureMessage\n"
+        '1792059800000,10,A,200,OK,true,""\n'
+        '1792059800100,11,B,500,Err,false,"line1\nline2\nline3"\n'
+        '1792059800200,12,C,200,OK,true,""\n',
+        encoding="utf-8",
+    )
+    spans = [(e["line_start"], e["line_end"]) for e in parse_csv_file(f)]
+    assert spans == [(2, 2), (3, 5), (6, 6)]
+
+
+def test_text_parser_bounds_event_size_without_losing_lines(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.parsers.MAX_EVENT_LINES", 50)
+    f = tmp_path / "no_ts.log"
+    f.write_text("".join(f"plain line {i}\n" for i in range(130)), encoding="utf-8")
+
+    events = list(parse_text_file(f))
+
+    assert len(events) == 3  # 50 + 50 + 30
+    assert all(e["message"].count("\n") + 1 <= 50 for e in events)
+    assert events[0]["line_start"] == 1 and events[-1]["line_end"] == 130
+    for prev, nxt in zip(events, events[1:]):
+        assert nxt["line_start"] == prev["line_end"] + 1
+    assert "\n".join(e["message"] for e in events) == "\n".join(f"plain line {i}" for i in range(130))
+
+
+def test_split_segments_inherit_timestamp_level_and_request_id(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.parsers.MAX_EVENT_LINES", 3)
+    f = tmp_path / "trace.log"
+    f.write_text(
+        "2026-10-15 10:00:00.000 ERROR request_id=abc boom\n" + "    at com.example.Foo(Foo.java:1)\n" * 7,
+        encoding="utf-8",
+    )
+    events = list(parse_text_file(f))
+    assert len(events) == 3  # 3 + 3 + 2 lines
+    assert events[0]["timestamp_utc_ms"] is not None
+    assert {e["timestamp_utc_ms"] for e in events} == {events[0]["timestamp_utc_ms"]}
+    assert all(e["level"] == "ERROR" and e["request_id"] == "abc" for e in events)
+
+
+def test_encoding_is_detected_beyond_the_first_chunk(tmp_path: Path):
+    """cp1251 file that starts with a long ASCII banner: the head alone looks like UTF-8."""
+    head = b"2026-10-15 10:00:00.000 INFO startup ok\n" * 1000  # ~40 KB of pure ASCII
+    tail = "2026-10-15 10:00:01.000 ERROR Ошибка подключения к базе\n".encode("cp1251")
+    f = tmp_path / "late_cyrillic.log"
+    f.write_bytes(head + tail)
+
+    last = list(parse_text_file(f))[-1]["message"]
+    assert "Ошибка подключения к базе" in last
+    assert "\ufffd" not in last
+
+
+def test_xml_jtl_nested_samples_are_all_parsed(tmp_path: Path):
+    f = tmp_path / "nested.xml"
+    f.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><testResults version="1.2">'
+        '<sample t="30" ts="1792059800000" s="true" lb="parent" rc="200">'
+        '<httpSample t="10" ts="1792059800001" s="true" lb="child1" rc="200"/>'
+        '<httpSample t="20" ts="1792059800011" s="false" lb="child2" rc="500"/>'
+        "</sample>"
+        '<httpSample t="5" ts="1792059800100" s="true" lb="next" rc="200"/>'
+        "</testResults>",
+        encoding="utf-8",
+    )
+    events = list(parse_xml_jtl(f))
+    labels = [json.loads(e["fields_json"])["label"] for e in events]
+    assert labels == ["child1", "child2", "parent", "next"]  # inner samples close first
+    assert events[2]["duration_ms"] == 30
+
+
+def test_xml_jtl_memory_is_independent_of_sample_count(tmp_path: Path):
+    """README promises O(1) memory; the empty cleared elements used to pile up under the root."""
+    n = 60_000
+    f = tmp_path / "big.xml"
+    with f.open("w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0" encoding="UTF-8"?>\n<testResults version="1.2">\n')
+        for i in range(n):
+            fh.write(f'<httpSample t="{i % 500}" lt="5" ts="{1792059800000 + i}" s="true" lb="GET /x" rc="200" rm="OK" tn="TG 1-1" by="10"/>\n')
+        fh.write("</testResults>\n")
+
+    tracemalloc.start()
+    try:
+        count = sum(1 for _ in parse_xml_jtl(f))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert count == n
+    assert peak < 2 * 1024 * 1024, f"peak {peak / 1024 / 1024:.1f} MB grows with the number of samples"
